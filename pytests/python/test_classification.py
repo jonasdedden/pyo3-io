@@ -151,15 +151,18 @@ class TestTheLadderRungs:
             ext.text_read_all(io.BytesIO(BYTES))
 
     def test_encoding_attribute_rung(self):
-        class HasEncoding:
+        class ReportsDecoding:
+            """What `io.TextIOBase` reports about its decoding."""
+
             encoding = "utf-8"
+            errors = "strict"
 
             def read(self, size=-1, /) -> str:
                 return TEXT[:size]
 
-        assert ext.text_read_chars(HasEncoding(), 4) == TEXT[:4]
-        with pytest.raises(TypeError, match="str `encoding` attribute"):
-            ext.binary_read_all(HasEncoding())
+        assert ext.text_read_chars(ReportsDecoding(), 4) == TEXT[:4]
+        with pytest.raises(TypeError, match="`encoding` and `errors` of a text stream"):
+            ext.binary_read_all(ReportsDecoding())
 
     def test_mode_is_never_consulted(self):
         """It would settle 23 more objects, and be wrong about two of them.
@@ -325,15 +328,16 @@ class TestTheEscapeHatch:
     while dealing in bytes.
     """
 
-    def test_an_object_that_misreports_an_encoding_is_refused(self):
-        class BinaryButClaimsAnEncoding:
-            encoding = "utf-8"  # for its own purposes; it still deals in bytes
+    def test_an_object_that_reports_both_attributes_is_refused(self):
+        class BinaryButLooksLikeATextStream:
+            encoding = "utf-8"
+            errors = "strict"
 
             def read(self, size=-1, /) -> bytes:
                 return BYTES[:size]
 
-        with pytest.raises(TypeError, match="str `encoding` attribute"):
-            ext.binary_read_exactly(BinaryButClaimsAnEncoding(), 4)
+        with pytest.raises(TypeError, match="`encoding` and `errors` of a text stream"):
+            ext.binary_read_exactly(BinaryButLooksLikeATextStream(), 4)
 
     def test_the_escape_hatch_handles_it(self, files):
         class TextInBinaryClothing(io.RawIOBase):
@@ -418,5 +422,84 @@ class TestWhyBothBinaryBasesAreNamed:
         assert not isinstance(handle, (io.RawIOBase, io.BufferedIOBase, io.TextIOBase))
         # the shortcut's verdict would be "binary"; the real answer is text, and it works
         assert ext.text_read_chars(handle, 4) == TEXT[:4]
-        with pytest.raises(TypeError, match="str `encoding` attribute"):
+        with pytest.raises(TypeError, match="`encoding` and `errors` of a text stream"):
             ext.binary_read_exactly(_spooled("w+", TEXT), 4)
+
+
+class TestShieldingTheEncodingRung:
+    """`encoding` is a common attribute name, so three things keep it from misfiring."""
+
+    def test_the_io_hierarchy_decides_first(self):
+        """A class inside `io` never reaches the rung, whatever attributes it carries.
+
+        This is the important one: anything deriving from the binary half of `io` is already
+        classified before `encoding` is looked at, so an `encoding` attribute on it is ignored.
+        """
+
+        class BufferedWithAnEncodingAttribute(io.BytesIO):
+            encoding = "utf-8"  # for its own purposes
+            errors = "strict"
+
+        handle = BufferedWithAnEncodingAttribute(BYTES)
+        assert ext.binary_read_exactly(handle, 4) == BYTES[:4]
+        with pytest.raises(TypeError, match="io.RawIOBase or io.BufferedIOBase"):
+            ext.text_read_chars(BufferedWithAnEncodingAttribute(BYTES), 4)
+
+    def test_encoding_alone_is_not_enough(self):
+        """`errors` has to be there too, which is far more specific to a text stream."""
+
+        class OwnUseOfEncoding:
+            encoding = "utf-8"  # e.g. what it will encode its output as later
+
+            def read(self, size=-1, /) -> bytes:
+                return BYTES[:size]
+
+        assert ext.binary_read_exactly(OwnUseOfEncoding(), 4) == BYTES[:4]
+
+    def test_a_non_string_encoding_is_not_enough(self):
+        class EnumLikeEncoding:
+            encoding = 42
+            errors = "strict"
+
+            def read(self, size=-1, /) -> bytes:
+                return BYTES[:size]
+
+        assert ext.binary_read_exactly(EnumLikeEncoding(), 4) == BYTES[:4]
+
+    def test_requiring_errors_costs_no_coverage(self, files):
+        """Every standard-library object with a str `encoding` has an `errors` as well."""
+        for name, factory in text_factories(files).items():
+            handle = factory()
+            encoding = getattr(handle, "encoding", None)
+            if isinstance(encoding, str):
+                assert hasattr(handle, "errors"), name
+
+    def test_what_is_left_is_a_refusal_that_names_itself(self):
+        """Not a corruption, and the message says which rung fired so it is diagnosable."""
+
+        class LooksLikeText:
+            encoding = "utf-8"
+            errors = "strict"
+
+            def read(self, size=-1, /) -> bytes:
+                return BYTES[:size]
+
+        with pytest.raises(TypeError, match="`encoding` and `errors` of a text stream"):
+            ext.binary_read_exactly(LooksLikeText(), 4)
+
+    def test_and_unchecked_is_the_way_past_it(self):
+        class LooksLikeBinary(io.RawIOBase):
+            def __init__(self):
+                self.left = TEXT
+
+            def readable(self):
+                return True
+
+            def read(self, size=-1, /) -> str:
+                if size is None or size < 0:
+                    chunk, self.left = self.left, ""
+                else:
+                    chunk, self.left = self.left[:size], self.left[size:]
+                return chunk
+
+        assert ext.text_read_all_unchecked(LooksLikeBinary()) == TEXT

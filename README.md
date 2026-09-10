@@ -122,11 +122,35 @@ Only signals that do not lie are used. Measured across forty standard-library fi
 | signal | right | wrong | says nothing |
 |---|---|---|---|
 | the `io` hierarchy | 28 | 0 | 7 |
-| a `str` `encoding` attribute | 11 | 0 | 24 |
+| the `encoding` + `errors` a text stream reports | 11 | 0 | 24 |
 | a `mode` attribute | 23 | **2** | 10 |
 
 So the ladder is: `io.TextIOBase` means text and `io.RawIOBase`/`io.BufferedIOBase` mean bytes;
-failing that, a `str` `encoding` means text; failing that, nothing is assumed.
+failing that, the attributes a text stream reports about its decoding mean text; failing that,
+nothing is assumed.
+
+#### Keeping the second rung from misfiring
+
+`encoding` is a common enough attribute name that a class could have one for its own purposes and
+never have heard of `io.TextIOBase`. Three things stop that becoming a wrong answer.
+
+**The `io` hierarchy decides first.** Only an object outside it reaches the second rung at all, so
+a `BytesIO` subclass with an `encoding` attribute is classified binary and the attribute is never
+looked at. That covers most of the risk on its own.
+
+**Both `encoding` and `errors` are required.** `io.TextIOBase` defines `encoding`, `errors` and
+`newlines`, and `errors` alongside a `str` `encoding` is specific to a text stream in a way that
+`encoding` alone is not. It costs nothing: every standard-library object with a `str` `encoding`
+has an `errors` too, so requiring both fires on the same thirteen. `newlines` as well would be too
+strict — `codecs.open(..)` has no such attribute.
+
+**What is left is a refusal, not a corruption.** An object that reports both while dealing in
+bytes is turned away with a message naming the rung that fired, and [`Unchecked`] is the
+documented way past it. A false rejection is diagnosable; a wrong answer that reads is not.
+
+Dropping the rung entirely is the other option, and it is nearly free: it costs the early
+rejection for `tempfile.SpooledTemporaryFile(mode="w+")` and `codecs.open(..)`, both of which
+would fall to duck typing and still work in their correct kind.
 
 Both binary bases are named because they are siblings under `IOBase`, not one inside the other,
 and both halves hold ordinary objects — `open(p, "rb", buffering=0)` and `io.FileIO` are raw,
@@ -440,7 +464,7 @@ its classes belong. The `pyo3` crate itself needs no change.
   does, for all thirty aliases.
 - **3 comparison tests** (`tests/comparison.rs`) — the type-level claims the table above makes
   about `pyo3-filelike`, so it fails rather than going quietly out of date.
-- **187 runtime tests** (`pytests/python/`) — payload round-tripping, character-vs-byte counting,
+- **193 runtime tests** (`pytests/python/`) — payload round-tripping, character-vs-byte counting,
   the classification ladder against every standard-library file-like object, capability checks,
   misbehaving objects, and two files of side-by-side comparisons asserting both what `pyo3-file`
   and `pyo3-filelike` do today and what this crate does instead.

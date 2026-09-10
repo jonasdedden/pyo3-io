@@ -132,10 +132,24 @@ fn classify(obj: &Bound<'_, PyAny>) -> Result<(Payload, &'static str), Error> {
         ));
     }
 
-    // 2. A `str` encoding. Only something producing text has one to report.
+    // 2. The attributes a text stream reports about its decoding. `io.TextIOBase` defines
+    //    `encoding`, `errors` and `newlines`, and both of the first two are required here rather
+    //    than `encoding` alone: `encoding` is a common enough attribute name that a class could
+    //    have one for its own purposes, whereas `errors` alongside it is specific to this. It
+    //    costs nothing to ask for both — every standard-library object with a `str` `encoding`
+    //    has an `errors` too — and `newlines` as well would be too strict, since
+    //    `codecs.open(..)` has no such attribute.
+    //
+    //    Only objects outside the `io` hierarchy get this far at all, since rung 1 has already
+    //    decided for everything inside it.
     if let Some(encoding) = optional_attr(obj, intern!(py, "encoding")) {
-        if encoding.is_instance_of::<PyString>() {
-            return Ok((Payload::Text, "it has a str `encoding` attribute"));
+        if encoding.is_instance_of::<PyString>()
+            && optional_attr(obj, intern!(py, "errors")).is_some()
+        {
+            return Ok((
+                Payload::Text,
+                "it reports the `encoding` and `errors` of a text stream",
+            ));
         }
     }
 
