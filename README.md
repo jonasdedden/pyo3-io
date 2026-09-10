@@ -40,6 +40,7 @@ on `pyo3` and on this crate is the whole opt-in.
 | kind decided by | `isinstance(obj, io.TextIOBase)` | `mode` attribute, binary if absent | the Rust type; the object is only checked for *contradicting* it |
 | duck-typed objects | accepted | accepted, then fail inside the extraction | accepted |
 | minimal writer (only `write`) | rejected | accepted | accepted |
+| override for a misidentified object | n/a | n/a | `Unchecked<..>`, keeps the annotation |
 | text reachable through `io::Read` | yes | yes | **no** |
 | a text handle round-trips the file's bytes | no | no | **n/a — refused** |
 | text reads work at every length | no | **yes** | yes |
@@ -145,6 +146,31 @@ only signal.
 `codecs`, `os.fdopen`, `sys.stdout` — through both kinds, asserting each is accepted by one and
 refused by the other.
 
+#### The limits of rung 4
+
+A sweep of forty standard-library file-like objects found `mode` disagreeing with what `read`
+actually returns in exactly two of them, and both are the `codecs` cases above. Ten more have no
+usable `mode` at all — `io.BytesIO`, `io.StringIO`, `gzip.open(.., "rt")`, `mmap`, a text
+`subprocess` pipe — which is why `mode` cannot be the primary signal either. Everything else
+agrees.
+
+So the residual risk is a *third-party* wrapper that copies the `codecs` pattern without deriving
+from the `codecs` classes. That is a false rejection rather than a corruption, the message names
+`mode` as the reason, and [`Unchecked`] is the way to say you know better:
+
+```rust,ignore
+#[pyfunction]
+fn read_it(source: Unchecked<TextRead>) -> PyResult<String> { .. }
+// still generates: def read_it(source: SupportsTextRead) -> str: ...
+```
+
+It skips the payload-kind check and keeps the capability checks, and it carries the same protocol,
+so reaching for it costs nothing in the annotation.
+
+`mode` never reaches the type stubs. The protocols come from the Rust type alone, so nothing an
+object claims about itself can influence what the type checker demands — only whether that
+particular object is let through at runtime.
+
 Rung 5 is the one that cannot be checked, so when a duck-typed object turns out to deal in the
 other payload after all, the error says what to do about it rather than surfacing the raw
 extraction failure:
@@ -235,6 +261,24 @@ when it is there and requiring it would turn away every minimal writer that impl
 else. `tell` is required for text seeking, in contrast, because it is the only way to get a
 position `seek_to` will accept and there is no sensible way to degrade without it.
 
+### Why `flush` is not a capability
+
+`std::io::Write::flush` is a *required* trait method and `std` has no `Flush` trait, so there is no
+"flush half" of `Write` to implement conditionally: `impl Write` must provide a `flush` whatever
+the object has. The choice is between refusing objects that lack one and calling it only when it
+is there.
+
+This crate calls it when it is there. An object with no `flush` either does not buffer, in which
+case `Ok(())` is truthful, or buffers with no way to be flushed, in which case nothing would help
+— and every `io.IOBase` subclass inherits a `flush`, so the latter takes a duck-typed object that
+buffers privately, which is broken by Python's own conventions.
+
+Making flushability *demandable* is possible but expensive: a fifth capability, `io::Write`
+implemented only for the flushable half, an inherent write API for the other half so it is not
+left with nothing, and 46 protocols instead of 30. A plain `BinaryWrite` would lose `BufWriter`,
+`write!` and `io::copy`. The gain is being able to say "this stream must be flushable" in a type,
+which is worth less than that costs. `tests/api_surface.rs` records the decision.
+
 Thirty protocols are linked into every extension, since they are `#[used]` statics. The stub
 generator keeps the ones an annotation refers to and drops the rest.
 
@@ -249,11 +293,11 @@ its classes belong. The `pyo3` crate itself needs no change.
 
 - **11 compile-fail tests** (`tests/ui/`) — every capability the type does not carry is a Rust
   compile error, including `io::Read` on a text file, which is the guarantee a gzip decoder wants.
-- **5 API surface tests** (`tests/api_surface.rs`) — the other half: everything that should exist
+- **6 API surface tests** (`tests/api_surface.rs`) — the other half: everything that should exist
   does, for all thirty aliases.
 - **3 comparison tests** (`tests/comparison.rs`) — the type-level claims the table above makes
   about `pyo3-filelike`, so it fails rather than going quietly out of date.
-- **156 runtime tests** (`pytests/python/`) — payload round-tripping, character-vs-byte counting,
+- **160 runtime tests** (`pytests/python/`) — payload round-tripping, character-vs-byte counting,
   the classification ladder against every standard-library file-like object, capability checks,
   misbehaving objects, and two files of side-by-side comparisons asserting both what `pyo3-file`
   and `pyo3-filelike` do today and what this crate does instead.

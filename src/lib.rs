@@ -193,6 +193,23 @@ where
         Python::attach(|py| Self::py_new(obj.into_bound(py)))
     }
 
+    /// Wraps `obj` without checking the payload kind, keeping the capability checks.
+    ///
+    /// The escape hatch for an object that misidentifies itself. The only way that happens in the
+    /// standard library is `codecs.getreader(..)` and `codecs.open(..)`, which report the wrapped
+    /// file's `mode` of `"rb"` while producing `str`, and both are recognised by name. A
+    /// third-party wrapper doing the same thing without deriving from the `codecs` classes would
+    /// be classified by its `mode` and refused; this is how to say you know better.
+    ///
+    /// Nothing here is memory-unsafe. Getting it wrong means the first read or write fails.
+    pub fn py_new_unchecked(obj: Bound<'_, PyAny>) -> PyResult<Self> {
+        Self::check_capabilities(&obj)?;
+        Ok(Self {
+            obj: obj.unbind(),
+            mode: PhantomData,
+        })
+    }
+
     fn check_mode(obj: &Bound<'_, PyAny>) -> PyResult<()> {
         let (payload, why) = classify(obj)?;
         let name = obj.get_type().name()?;
@@ -281,6 +298,61 @@ where
                 obj.call_method0(intern!(py, "fileno"))?.extract::<i32>()
             })
         })
+    }
+}
+
+/// A [`PyFile`] extracted without the payload-kind check, keeping the capability checks.
+///
+/// The escape hatch for an object that misidentifies itself, in a form that can still appear in a
+/// `#[pyfunction]` signature — it carries the same type stub protocol as the file it wraps, so
+/// using it costs nothing in the annotation:
+///
+/// ```rust,ignore
+/// #[pyfunction]
+/// fn read_it(source: Unchecked<TextRead>) -> PyResult<String> { .. }
+/// // def read_it(source: SupportsTextRead) -> str: ...
+/// ```
+///
+/// See [`PyFile::py_new_unchecked`] for when that is needed.
+#[derive(Debug, Clone)]
+pub struct Unchecked<T>(T);
+
+impl<T> Unchecked<T> {
+    /// The file underneath.
+    pub fn into_inner(self) -> T {
+        self.0
+    }
+}
+
+impl<T> core::ops::Deref for Unchecked<T> {
+    type Target = T;
+
+    fn deref(&self) -> &T {
+        &self.0
+    }
+}
+
+impl<T> core::ops::DerefMut for Unchecked<T> {
+    fn deref_mut(&mut self) -> &mut T {
+        &mut self.0
+    }
+}
+
+impl<'py, M, const READ: bool, const WRITE: bool, const SEEK: bool, const FILENO: bool>
+    FromPyObject<'_, 'py> for Unchecked<PyFile<M, READ, WRITE, SEEK, FILENO>>
+where
+    M: Mode,
+{
+    type Error = PyErr;
+
+    // Deliberately the same protocol as the checked form: skipping the runtime check says nothing
+    // about what the object has to provide.
+    #[cfg(feature = "experimental-inspect")]
+    const INPUT_TYPE: pyo3::inspect::PyStaticExpr =
+        introspection::protocol_hint(M::IS_TEXT, READ, WRITE, SEEK, FILENO);
+
+    fn extract(obj: Borrowed<'_, 'py, PyAny>) -> Result<Self, Self::Error> {
+        PyFile::py_new_unchecked(obj.as_any().clone()).map(Self)
     }
 }
 

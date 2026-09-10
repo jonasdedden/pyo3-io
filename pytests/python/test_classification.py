@@ -283,3 +283,58 @@ class TestDuckTypingIsTheFallback:
 
         with pytest.raises(OSError, match="did not return str.*taken at its word"):
             ext.text_read_chars(SilentlyBinary(), 4)
+
+
+class TestTheMoodOfTheModeAttribute:
+    """`mode` is the least reliable rung, so what it can and cannot do is pinned here.
+
+    A sweep of forty standard-library file-like objects found `mode` disagreeing with what `read`
+    actually returns in exactly two of them, `codecs.getreader(..)` and `codecs.open(..)`, both of
+    which report the *wrapped* file's mode. Both are caught a rung earlier, by name. What is left
+    is a third-party wrapper doing the same thing without deriving from the `codecs` classes.
+    """
+
+    def test_the_residual_limitation_is_real(self):
+        """A codecs-alike that is not a codecs subclass is classified by its `mode` and refused.
+
+        This is the documented limitation. It is a false rejection rather than a corruption, and
+        the message names `mode` as the reason so it is diagnosable.
+        """
+
+        class HomeGrownReader:
+            """Wraps a binary file and decodes it, like codecs, but inherits from nothing."""
+
+            def __init__(self, inner):
+                self._inner = inner
+                self.mode = inner.mode  # "rb", copied from the file underneath
+
+            def read(self, size=-1, /) -> str:
+                return self._inner.read(size).decode("utf-8")
+
+        with open(__file__, "rb") as inner:
+            with pytest.raises(TypeError, match=r"`mode` attribute contains 'b'"):
+                ext.text_read_all(HomeGrownReader(inner))
+
+    def test_the_escape_hatch_handles_it(self):
+        """`py_new_unchecked` skips the payload-kind check and keeps the capability checks."""
+
+        class HomeGrownReader:
+            def __init__(self, inner):
+                self._inner = inner
+                self.mode = inner.mode
+
+            def read(self, size=-1, /) -> str:
+                return self._inner.read(size).decode("utf-8")
+
+        with open(__file__, "rb") as inner:
+            got = ext.text_read_all_unchecked(HomeGrownReader(inner))
+        assert "the mood of the mode attribute" in got.lower()
+
+    def test_the_escape_hatch_still_checks_capabilities(self):
+        with pytest.raises(TypeError, match=r"has no \.read\(\) method"):
+            ext.text_read_all_unchecked(object())
+
+    def test_mode_never_reaches_the_type_stubs(self, stub_source):
+        """It is a runtime signal only. The protocols come from the Rust type, so nothing an
+        object says about itself can influence what the type checker demands."""
+        assert "mode" not in stub_source
