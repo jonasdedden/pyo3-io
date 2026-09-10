@@ -117,53 +117,30 @@ Decoding text and re-encoding it here would not round-trip the file's bytes.
 Only to *refuse* an object that contradicts what was asked for. Anything else is taken at its
 word, so a class implementing nothing but the methods it needs works.
 
-Only signals that do not lie are used. Measured across forty standard-library file-like objects:
-
-| signal | right | wrong | says nothing |
-|---|---|---|---|
-| the `io` hierarchy | 28 | 0 | 7 |
-| the `encoding` + `errors` a text stream reports | 11 | 0 | 24 |
-| a `mode` attribute | 23 | **2** | 10 |
-
-So the ladder is: `io.TextIOBase` means text and `io.RawIOBase`/`io.BufferedIOBase` mean bytes;
-failing that, the attributes a text stream reports about its decoding mean text; failing that,
-nothing is assumed.
-
-#### Keeping the second rung from misfiring
-
-`encoding` is a common enough attribute name that a class could have one for its own purposes and
-never have heard of `io.TextIOBase`. Three things stop that becoming a wrong answer.
-
-**The `io` hierarchy decides first.** Only an object outside it reaches the second rung at all, so
-a `BytesIO` subclass with an `encoding` attribute is classified binary and the attribute is never
-looked at. That covers most of the risk on its own.
-
-**Both `encoding` and `errors` are required.** `io.TextIOBase` defines `encoding`, `errors` and
-`newlines`, and `errors` alongside a `str` `encoding` is specific to a text stream in a way that
-`encoding` alone is not. It costs nothing: every standard-library object with a `str` `encoding`
-has an `errors` too, so requiring both fires on the same thirteen. `newlines` as well would be too
-strict — `codecs.open(..)` has no such attribute.
-
-**What is left is a refusal, not a corruption.** An object that reports both while dealing in
-bytes is turned away with a message naming the rung that fired, and [`Unchecked`] is the
-documented way past it. A false rejection is diagnosable; a wrong answer that reads is not.
-
-Dropping the rung entirely is the other option, and it is nearly free: it costs the early
-rejection for `tempfile.SpooledTemporaryFile(mode="w+")` and `codecs.open(..)`, both of which
-would fall to duck typing and still work in their correct kind.
+Only one signal is used, because only one *defines* the payload kind rather than correlating with
+it: `io.TextIOBase` is what it means for a stream's `read` to return `str`, and
+`io.RawIOBase`/`io.BufferedIOBase` what it means for one to return `bytes`. Anything the `io`
+hierarchy does not cover is taken at its word.
 
 Both binary bases are named because they are siblings under `IOBase`, not one inside the other,
 and both halves hold ordinary objects — `open(p, "rb", buffering=0)` and `io.FileIO` are raw,
 while `open(p, "rb")`, `io.BytesIO`, `gzip`, `zipfile`, sockets and subprocess pipes are buffered.
-Nothing is both.
+Nothing is both. The shortcut of testing `IOBase` and not `TextIOBase` would collapse them into
+one check and be wrong: `tempfile.SpooledTemporaryFile` derives from `IOBase` alone, so the
+`mode="w+"` form would be called binary when it reads `str`. Naming the two binary bases leaves
+that middle ground unclaimed, where it belongs.
 
-The shortcut of testing `IOBase` and not `TextIOBase` would collapse them into one check and be
-wrong: `tempfile.SpooledTemporaryFile` derives from `IOBase` alone, so the `mode="w+"` form would
-be called binary when it reads `str`. Naming the two binary bases leaves that middle ground
-unclaimed, which is what lets the `encoding` rung get it right.
+#### Two signals considered and rejected
 
-`mode` would settle twenty-three more objects and be wrong about two, and it is not used. Both
-wrong ones are `codecs`:
+Measured across forty standard-library file-like objects:
+
+| signal | right | wrong | says nothing |
+|---|---|---|---|
+| the `io` hierarchy | 28 | 0 | 7 |
+| a `mode` attribute | 23 | **2** | 10 |
+| the `encoding`/`errors` of a text stream | 2 more than `io` | 0 | — |
+
+**`mode` is wrong twice**, and both are `codecs`:
 
 ```python
 >>> reader = codecs.getreader("utf-8")(open(path, "rb"))
@@ -176,21 +153,27 @@ wrong ones are `codecs`:
 It wraps a binary file and reports *that* file's mode while producing `str`. `pyo3-filelike` has
 `mode` as its only signal and gets this exactly backwards.
 
-An earlier version of this crate kept `mode` and special-cased the `codecs` classes by name ahead
-of it. That works, but it is the wrong shape: it uses an unreliable signal and then patches the
-one place the unreliability is known to show. Dropping both leaves fewer objects classified and
-none misclassified, which is the better trade:
+**`encoding` and `errors` are never wrong, and still not worth it.** They are a proxy for
+`io.TextIOBase`, which the first rung already covers, so they only ever fire for something textual
+that is *not* a `TextIOBase` — in the whole standard library,
+`tempfile.SpooledTemporaryFile(mode="w+")` and `codecs.open(..)`. Both are accepted by the
+fallback anyway and work correctly there, so the rung bought nothing but an *earlier* error when
+one is used in the wrong kind. That is not worth turning away a binary object that happens to keep
+an `encoding` for its own reasons: a false rejection breaks a working program, where a late error
+does not.
 
-```text
-  [io, codecs, encoding, mode]   34 classified, 1 duck typed, 0 wrong
-  [io, encoding, mode]           33 classified, 1 duck typed, 1 wrong  <- special case removed only
-  [io, encoding]                 30 classified, 5 duck typed, 0 wrong  <- this
-```
+`typing.BinaryIO` and `typing.TextIO` are no help either. They are plain classes rather than
+`runtime_checkable` protocols, and `isinstance` against them is `False` for everything, including
+a real `open(p, "rb")`. They exist for annotations, and they demand the full 27-member `IO`
+surface, which is the problem this crate's protocols were written to avoid.
 
-The five that fall through are `tempfile.NamedTemporaryFile`,
-`tempfile.SpooledTemporaryFile(mode="wb+")`, `codecs.getreader(..)`, `codecs.EncodedFile(..)` and
-`mmap`. Every one works in its correct kind. Using one in the wrong kind is caught at the first
-read rather than at the boundary, with a message saying what to do:
+#### What falls through
+
+Seven of the forty: `tempfile.NamedTemporaryFile`, both `SpooledTemporaryFile` modes,
+`codecs.getreader(..)`, `codecs.open(..)`, `codecs.EncodedFile(..)` and `mmap`. Every one works in
+its correct kind. Using one in the wrong kind is caught at the first read rather than at the
+boundary, and there is no path on which it silently succeeds — extracting `bytes` from a `str`
+fails, and the other way round too:
 
 ```text
 OSError: read() did not return str (...). This is a text file-like object, and the object did not
@@ -464,7 +447,7 @@ its classes belong. The `pyo3` crate itself needs no change.
   does, for all thirty aliases.
 - **3 comparison tests** (`tests/comparison.rs`) — the type-level claims the table above makes
   about `pyo3-filelike`, so it fails rather than going quietly out of date.
-- **193 runtime tests** (`pytests/python/`) — payload round-tripping, character-vs-byte counting,
+- **186 runtime tests** (`pytests/python/`) — payload round-tripping, character-vs-byte counting,
   the classification ladder against every standard-library file-like object, capability checks,
   misbehaving objects, and two files of side-by-side comparisons asserting both what `pyo3-file`
   and `pyo3-filelike` do today and what this crate does instead.

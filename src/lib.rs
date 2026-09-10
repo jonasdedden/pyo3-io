@@ -100,28 +100,43 @@ enum Payload {
     Unknown,
 }
 
-/// Works out what an object deals in, from evidence that does not lie.
+/// Works out what an object deals in, from the only evidence that actually means something.
 ///
-/// Only two signals qualify, and this is measured rather than assumed: across forty standard
-/// library file-like objects, the `io` hierarchy is right 28 times and wrong none, and a `str`
-/// `encoding` attribute is right 11 times and wrong none.
+/// One signal: the `io` hierarchy. `io.TextIOBase` *is* the definition of a stream whose `read`
+/// returns `str`, and `io.RawIOBase`/`io.BufferedIOBase` of one that returns `bytes`. Everything
+/// else about an object correlates with its payload kind at best, and this deliberately uses
+/// nothing correlational:
 ///
-/// A `mode` attribute would settle 23 more, but it is wrong twice — `codecs.getreader(..)` and
-/// `codecs.open(..)` wrap a binary file and report *its* `"rb"` while producing `str` — so it is
-/// deliberately not consulted. Nothing here special-cases `codecs`; the unreliable signal is
-/// simply not used, and everything it would have settled falls through to the last rung instead.
+/// * A `mode` attribute would settle 23 more of the forty standard-library objects surveyed and
+///   be wrong about two. `codecs.getreader(..)` wraps a binary file and reports *its* `"rb"`
+///   while producing `str`.
+/// * The `encoding` and `errors` a text stream reports are a proxy for `io.TextIOBase`, which
+///   rung 1 already has covered. They only ever fire for something textual that is *not* a
+///   `TextIOBase` — in the whole standard library, `tempfile.SpooledTemporaryFile(mode="w+")` and
+///   `codecs.open(..)` — and all they buy for those is an error at extraction rather than at the
+///   first read, since both are accepted by the fallback anyway and used correctly either way.
+///   That is not worth turning away a binary object that keeps an `encoding` for its own reasons.
 ///
-/// That rung is "say nothing and let the object through", which is what keeps duck-typed objects
-/// working and what an object of no recognisable kind gets. Five of the forty land there:
-/// `tempfile.NamedTemporaryFile`, `tempfile.SpooledTemporaryFile(mode="wb+")`,
-/// `codecs.getreader(..)`, `codecs.EncodedFile(..)` and `mmap`. Each of them works in its correct
-/// kind; using one in the wrong kind is caught at the first read rather than here.
+/// So anything the `io` hierarchy does not cover is taken at its word, which is what keeps
+/// duck-typed objects working. Seven of the forty land there:
+/// `tempfile.NamedTemporaryFile`, both `SpooledTemporaryFile` modes, `codecs.getreader(..)`,
+/// `codecs.open(..)`, `codecs.EncodedFile(..)` and `mmap`. Each works in its correct kind. Using
+/// one in the wrong kind is caught at the first read, and there is no path on which it silently
+/// succeeds: extracting `bytes` from a `str` fails, and the other way round too.
 ///
 /// The returned string explains which rung fired, so a rejection can say why.
 fn classify(obj: &Bound<'_, PyAny>) -> Result<(Payload, &'static str), Error> {
     let py = obj.py();
 
-    // 1. The `io` hierarchy. Definitive, and covers most of the standard library.
+    // `RawIOBase` and `BufferedIOBase` are siblings under `IOBase`, not one inside the other, and
+    // both halves are populated by ordinary objects: `open(p, "rb", buffering=0)` and `io.FileIO`
+    // are raw, while `open(p, "rb")`, `io.BytesIO`, `gzip`, `zipfile`, sockets and subprocess
+    // pipes are buffered. Nothing is both, so neither check covers the other.
+    //
+    // The tempting shortcut is `IOBase` and not `TextIOBase`, which would collapse the two into
+    // one. It is wrong: `tempfile.SpooledTemporaryFile` derives from `IOBase` alone, so
+    // `SpooledTemporaryFile(mode="w+")` would be called binary when it reads `str`. Naming the two
+    // binary bases leaves that middle ground unclaimed, where it belongs.
     if obj.is_instance(text_io_base(py)?)? {
         return Ok((Payload::Text, "it is an io.TextIOBase"));
     }
@@ -132,38 +147,7 @@ fn classify(obj: &Bound<'_, PyAny>) -> Result<(Payload, &'static str), Error> {
         ));
     }
 
-    // 2. The attributes a text stream reports about its decoding. `io.TextIOBase` defines
-    //    `encoding`, `errors` and `newlines`, and both of the first two are required here rather
-    //    than `encoding` alone: `encoding` is a common enough attribute name that a class could
-    //    have one for its own purposes, whereas `errors` alongside it is specific to this. It
-    //    costs nothing to ask for both — every standard-library object with a `str` `encoding`
-    //    has an `errors` too — and `newlines` as well would be too strict, since
-    //    `codecs.open(..)` has no such attribute.
-    //
-    //    Only objects outside the `io` hierarchy get this far at all, since rung 1 has already
-    //    decided for everything inside it.
-    if let Some(encoding) = optional_attr(obj, intern!(py, "encoding")) {
-        if encoding.is_instance_of::<PyString>()
-            && optional_attr(obj, intern!(py, "errors")).is_some()
-        {
-            return Ok((
-                Payload::Text,
-                "it reports the `encoding` and `errors` of a text stream",
-            ));
-        }
-    }
-
-    // 3. Nothing trustworthy was said. Duck typing decides, and the capability checks are the
-    //    only requirement.
     Ok((Payload::Unknown, "it is duck typed"))
-}
-
-/// An attribute if it is there, and `None` for anything else, including a property that raises.
-fn optional_attr<'py>(
-    obj: &Bound<'py, PyAny>,
-    name: &Bound<'py, PyString>,
-) -> Option<Bound<'py, PyAny>> {
-    obj.getattr(name).ok()
 }
 
 impl<M, const READ: bool, const WRITE: bool, const SEEK: bool, const FILENO: bool>

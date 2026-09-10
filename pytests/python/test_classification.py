@@ -1,12 +1,17 @@
 """How the payload kind of an object is worked out.
 
-Only signals that do not lie are used, and everything else falls back to taking the object at its
-word. Measured across the standard-library objects below: the `io` hierarchy is right 28 times and
-wrong none, a `str` `encoding` attribute is right 11 times and wrong none, and a `mode` attribute
-would settle 23 more but is wrong twice, so it is not consulted at all.
+One signal is used: the `io` hierarchy, which *defines* the payload kind rather than correlating
+with it. Everything else falls back to taking the object at its word.
 
-That leaves five objects unclassified, listed in `TestFallsBackToDuckTyping`. Each works in its
-correct kind; using one in the wrong kind is caught at the first read instead of at the boundary.
+Measured across the standard-library objects below, the `io` hierarchy is right 28 times and wrong
+none. A `mode` attribute would settle 23 more and be wrong about two. The `encoding`/`errors` a
+text stream reports would settle two more, but only ever for something textual that is not an
+`io.TextIOBase`, which the fallback accepts anyway — so it bought nothing but an earlier error,
+at the price of turning away a binary object that keeps an `encoding` for its own reasons.
+
+That leaves seven objects unclassified, listed in `TestFallsBackToDuckTyping`. Each works in its
+correct kind; using one in the wrong kind is caught at the first read instead of at the boundary,
+and there is no path on which it silently succeeds.
 """
 
 import bz2
@@ -82,7 +87,6 @@ def text_factories(files):
         "io.TextIOWrapper": lambda: io.TextIOWrapper(io.BytesIO(BYTES)),
         "gzip rt": lambda: gzip.open(files["gz"], "rt"),
         "tempfile.TemporaryFile w+": lambda: tempfile.TemporaryFile("w+"),
-        "SpooledTemporaryFile w+": lambda: _spooled("w+", TEXT),
         "socket.makefile r": lambda: socket.socketpair()[0].makefile("r"),
         "sys.stdout": lambda: sys.stdout,
     }
@@ -93,6 +97,7 @@ def duck_typed_factories(files):
     return {
         "NamedTemporaryFile": lambda: tempfile.NamedTemporaryFile(),
         "SpooledTemporaryFile wb+": lambda: _spooled("wb+", BYTES),
+        "SpooledTemporaryFile w+": lambda: _spooled("w+", TEXT),
         "codecs.getreader": lambda: codecs.getreader("utf-8")(open(files["bin"], "rb")),
         "codecs.EncodedFile": lambda: codecs.EncodedFile(open(files["bin"], "rb"), "utf-8"),
     }
@@ -150,20 +155,6 @@ class TestTheLadderRungs:
         with pytest.raises(TypeError, match=r"io\.RawIOBase or io\.BufferedIOBase"):
             ext.text_read_all(io.BytesIO(BYTES))
 
-    def test_encoding_attribute_rung(self):
-        class ReportsDecoding:
-            """What `io.TextIOBase` reports about its decoding."""
-
-            encoding = "utf-8"
-            errors = "strict"
-
-            def read(self, size=-1, /) -> str:
-                return TEXT[:size]
-
-        assert ext.text_read_chars(ReportsDecoding(), 4) == TEXT[:4]
-        with pytest.raises(TypeError, match="`encoding` and `errors` of a text stream"):
-            ext.binary_read_all(ReportsDecoding())
-
     def test_mode_is_never_consulted(self):
         """It would settle 23 more objects, and be wrong about two of them.
 
@@ -218,19 +209,22 @@ class TestTheLadderRungs:
 class TestFallsBackToDuckTyping:
     """The objects no trustworthy signal covers. Each works in its correct kind."""
 
+    TEXTUAL = {"codecs.getreader", "SpooledTemporaryFile w+"}
+
     def test_they_work_as_binary(self, files):
         for name, factory in duck_typed_factories(files).items():
-            if name == "codecs.getreader":
-                continue  # genuinely text
+            if name in self.TEXTUAL:
+                continue
             handle = factory()
             try:
                 ext.binary_read_exactly(handle, 4)
             except Exception as err:  # noqa: BLE001
                 pytest.fail(f"{name} should work as binary: {err}")
 
-    def test_codecs_getreader_works_as_text(self, files):
-        reader = duck_typed_factories(files)["codecs.getreader"]()
-        assert ext.text_read_chars(reader, 4) == TEXT[:4]
+    def test_the_textual_ones_work_as_text(self, files):
+        for name in self.TEXTUAL:
+            handle = duck_typed_factories(files)[name]()
+            assert ext.text_read_chars(handle, 4) == TEXT[:4], name
 
     def test_using_one_in_the_wrong_kind_is_caught_at_the_first_read(self, files):
         """Not at the boundary, which is the price of not guessing. Still an error, with a
@@ -328,16 +322,17 @@ class TestTheEscapeHatch:
     while dealing in bytes.
     """
 
-    def test_an_object_that_reports_both_attributes_is_refused(self):
-        class BinaryButLooksLikeATextStream:
-            encoding = "utf-8"
+    def test_an_object_with_its_own_encoding_attribute_is_left_alone(self):
+        """Nothing correlational is consulted, so this is simply accepted for what it is."""
+
+        class BinaryThatKeepsAnEncoding:
+            encoding = "utf-8"  # for its own purposes
             errors = "strict"
 
             def read(self, size=-1, /) -> bytes:
                 return BYTES[:size]
 
-        with pytest.raises(TypeError, match="`encoding` and `errors` of a text stream"):
-            ext.binary_read_exactly(BinaryButLooksLikeATextStream(), 4)
+        assert ext.binary_read_exactly(BinaryThatKeepsAnEncoding(), 4) == BYTES[:4]
 
     def test_the_escape_hatch_handles_it(self, files):
         class TextInBinaryClothing(io.RawIOBase):
@@ -420,86 +415,6 @@ class TestWhyBothBinaryBasesAreNamed:
         handle = _spooled("w+", TEXT)
         assert isinstance(handle, io.IOBase)
         assert not isinstance(handle, (io.RawIOBase, io.BufferedIOBase, io.TextIOBase))
-        # the shortcut's verdict would be "binary"; the real answer is text, and it works
+        # The shortcut's verdict would be "binary", which is wrong. The real ladder gives no
+        # verdict at all, so the object is taken at its word and works.
         assert ext.text_read_chars(handle, 4) == TEXT[:4]
-        with pytest.raises(TypeError, match="`encoding` and `errors` of a text stream"):
-            ext.binary_read_exactly(_spooled("w+", TEXT), 4)
-
-
-class TestShieldingTheEncodingRung:
-    """`encoding` is a common attribute name, so three things keep it from misfiring."""
-
-    def test_the_io_hierarchy_decides_first(self):
-        """A class inside `io` never reaches the rung, whatever attributes it carries.
-
-        This is the important one: anything deriving from the binary half of `io` is already
-        classified before `encoding` is looked at, so an `encoding` attribute on it is ignored.
-        """
-
-        class BufferedWithAnEncodingAttribute(io.BytesIO):
-            encoding = "utf-8"  # for its own purposes
-            errors = "strict"
-
-        handle = BufferedWithAnEncodingAttribute(BYTES)
-        assert ext.binary_read_exactly(handle, 4) == BYTES[:4]
-        with pytest.raises(TypeError, match="io.RawIOBase or io.BufferedIOBase"):
-            ext.text_read_chars(BufferedWithAnEncodingAttribute(BYTES), 4)
-
-    def test_encoding_alone_is_not_enough(self):
-        """`errors` has to be there too, which is far more specific to a text stream."""
-
-        class OwnUseOfEncoding:
-            encoding = "utf-8"  # e.g. what it will encode its output as later
-
-            def read(self, size=-1, /) -> bytes:
-                return BYTES[:size]
-
-        assert ext.binary_read_exactly(OwnUseOfEncoding(), 4) == BYTES[:4]
-
-    def test_a_non_string_encoding_is_not_enough(self):
-        class EnumLikeEncoding:
-            encoding = 42
-            errors = "strict"
-
-            def read(self, size=-1, /) -> bytes:
-                return BYTES[:size]
-
-        assert ext.binary_read_exactly(EnumLikeEncoding(), 4) == BYTES[:4]
-
-    def test_requiring_errors_costs_no_coverage(self, files):
-        """Every standard-library object with a str `encoding` has an `errors` as well."""
-        for name, factory in text_factories(files).items():
-            handle = factory()
-            encoding = getattr(handle, "encoding", None)
-            if isinstance(encoding, str):
-                assert hasattr(handle, "errors"), name
-
-    def test_what_is_left_is_a_refusal_that_names_itself(self):
-        """Not a corruption, and the message says which rung fired so it is diagnosable."""
-
-        class LooksLikeText:
-            encoding = "utf-8"
-            errors = "strict"
-
-            def read(self, size=-1, /) -> bytes:
-                return BYTES[:size]
-
-        with pytest.raises(TypeError, match="`encoding` and `errors` of a text stream"):
-            ext.binary_read_exactly(LooksLikeText(), 4)
-
-    def test_and_unchecked_is_the_way_past_it(self):
-        class LooksLikeBinary(io.RawIOBase):
-            def __init__(self):
-                self.left = TEXT
-
-            def readable(self):
-                return True
-
-            def read(self, size=-1, /) -> str:
-                if size is None or size < 0:
-                    chunk, self.left = self.left, ""
-                else:
-                    chunk, self.left = self.left[:size], self.left[size:]
-                return chunk
-
-        assert ext.text_read_all_unchecked(LooksLikeBinary()) == TEXT
