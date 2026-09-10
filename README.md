@@ -37,7 +37,9 @@ on `pyo3` and on this crate is the whole opt-in.
 |  | `pyo3-file` | `pyo3-filelike` | this crate |
 |---|---|---|---|
 | payload kind is static | no | **yes**, two types | yes |
-| kind decided by | `isinstance(obj, io.TextIOBase)` | `mode` attribute, binary if absent | the Rust type; nothing to detect |
+| kind decided by | `isinstance(obj, io.TextIOBase)` | `mode` attribute, binary if absent | the Rust type; the object is only checked for *contradicting* it |
+| duck-typed objects | accepted | accepted, then fail inside the extraction | accepted |
+| minimal writer (only `write`) | rejected | accepted | accepted |
 | text reachable through `io::Read` | yes | yes | **no** |
 | a text handle round-trips the file's bytes | no | no | **n/a — refused** |
 | text reads work at every length | no | **yes** | yes |
@@ -101,12 +103,57 @@ kind it needs, and Python's own machinery does the conversion if one is required
 | binary object | text | `io.TextIOWrapper(obj, encoding=...)` |
 
 That is better than transcoding here, because the caller names the encoding instead of this crate
-assuming UTF-8. The error messages say so:
+assuming UTF-8. The error messages say so, and name the evidence they used:
 
 ```text
-TypeError: expected a binary file-like object, got the text object TextIOWrapper. Pass obj.buffer
-to get at the bytes underneath, or open the file in binary mode. Decoding text and re-encoding it
-here would not round-trip the file's bytes.
+TypeError: expected a binary file-like object, got the text object TextIOWrapper (it is an
+io.TextIOBase). Pass obj.buffer to get at the bytes underneath, or open the file in binary mode.
+Decoding text and re-encoding it here would not round-trip the file's bytes.
+```
+
+### How the kind is worked out
+
+Only to *refuse* an object that contradicts what was asked for. Anything that says nothing about
+itself is taken at its word, so a class implementing nothing but the methods it needs works. The
+rungs are tried in order, most explicit first, because the cheap signals are the unreliable ones:
+
+1. **The `io` hierarchy.** `io.TextIOBase` means text, `io.RawIOBase` or `io.BufferedIOBase` mean
+   bytes. Definitive, and it settles nearly everything in the standard library.
+2. **The `codecs` stream wrappers.** `StreamReader`, `StreamWriter` and `StreamReaderWriter` are
+   outside the `io` hierarchy entirely and decode to `str`.
+3. **A `str` `encoding` attribute.** Only a text stream has one to report.
+4. **A self-declared `mode`.** `'b'` means bytes. This is what `tempfile.SpooledTemporaryFile`
+   leaves to go on, since it derives from `io.IOBase` without saying which half.
+5. **Nothing.** Accepted either way; the capability checks are the only requirement.
+
+Rung 2 has to come before rung 4, and this is why:
+
+```python
+>>> reader = codecs.getreader("utf-8")(open(path, "rb"))
+>>> reader.mode
+'rb'
+>>> type(reader.read(5))
+<class 'str'>
+```
+
+It reports the *wrapped* file's mode while producing `str`. Anything consulting `mode` first calls
+it binary and gets it exactly backwards — which is what `pyo3-filelike` does, since `mode` is its
+only signal.
+
+`test_classification.py` runs every rung and every standard-library file-like object I could find
+— `gzip`, `bz2`, `lzma`, `zipfile`, `tarfile`, `tempfile`, `socket.makefile`, `subprocess` pipes,
+`codecs`, `os.fdopen`, `sys.stdout` — through both kinds, asserting each is accepted by one and
+refused by the other.
+
+Rung 5 is the one that cannot be checked, so when a duck-typed object turns out to deal in the
+other payload after all, the error says what to do about it rather than surfacing the raw
+extraction failure:
+
+```text
+OSError: read() did not return bytes (TypeError: 'str' object cannot be converted to 'PyBytes').
+This is a binary file-like object, and the object did not identify itself as text, so it was taken
+at its word. If it deals in str, ask for it as a text PyFile, or wrap it with io.TextIOWrapper on
+the Python side.
 ```
 
 ### Binary
@@ -178,9 +225,15 @@ rejected by both.
 
 `read` returns `_typeshed.ReadableBuffer` rather than `bytes` because that is what the extraction
 actually accepts: `bytes`, `bytearray`, `memoryview` and `array` all work, and so does the
-`buffer` attribute of a text stream, which is the escape hatch the error message recommends.
-Everything that writes also requires `flush`, because a writable `PyFile` is a `std::io::Write`
-and its `flush` calls the object's.
+`buffer` attribute of a text stream, which is the escape hatch the error message recommends. (The
+runtime will also take a `Sequence[int]`; the protocol does not, since nothing real returns a
+`list` from `read`.)
+
+`flush` is deliberately *not* in the writing protocols. A `Protocol` cannot mark a member
+optional, and an object with no `flush` has nothing to flush, so the implementation calls it only
+when it is there and requiring it would turn away every minimal writer that implements nothing
+else. `tell` is required for text seeking, in contrast, because it is the only way to get a
+position `seek_to` will accept and there is no sensible way to degrade without it.
 
 Thirty protocols are linked into every extension, since they are `#[used]` statics. The stub
 generator keeps the ones an annotation refers to and drops the rest.
@@ -200,10 +253,10 @@ its classes belong. The `pyo3` crate itself needs no change.
   does, for all thirty aliases.
 - **3 comparison tests** (`tests/comparison.rs`) — the type-level claims the table above makes
   about `pyo3-filelike`, so it fails rather than going quietly out of date.
-- **139 runtime tests** (`pytests/python/`) — payload round-tripping, character-vs-byte counting,
-  capability and payload-kind checks, misbehaving objects, and two files of side-by-side
-  comparisons asserting both what `pyo3-file` and `pyo3-filelike` do today and what this crate
-  does instead.
+- **156 runtime tests** (`pytests/python/`) — payload round-tripping, character-vs-byte counting,
+  the classification ladder against every standard-library file-like object, capability checks,
+  misbehaving objects, and two files of side-by-side comparisons asserting both what `pyo3-file`
+  and `pyo3-filelike` do today and what this crate does instead.
 - **Type-checker tests** (`pytests/typecheck/`) — `pyright` over a file that must produce no
-  errors and one that must produce exactly eleven, one per rule.
+  errors and one that must produce exactly ten, one per rule.
 - **A stub snapshot** — the generated `.pyi` is checked in, so any change to it shows up in review.

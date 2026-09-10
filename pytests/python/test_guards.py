@@ -80,13 +80,20 @@ class TestCapabilityChecks:
         with pytest.raises(TypeError, match=r"has no \.write\(\) method"):
             ext.binary_write(NoWrite(), b"x")
 
-    def test_missing_flush(self):
+    def test_flush_is_not_required(self):
+        """An object with no `flush` has nothing to flush, so it is accepted and not called."""
+
         class NoFlush:
+            def __init__(self):
+                self.chunks = []
+
             def write(self, data, /):
+                self.chunks.append(data)
                 return len(data)
 
-        with pytest.raises(TypeError, match=r"has no \.flush\(\) method"):
-            ext.binary_write(NoFlush(), b"x")
+        writer = NoFlush()
+        assert ext.binary_write(writer, b"xyz") == 3
+        assert b"".join(writer.chunks) == b"xyz"
 
     def test_missing_seek(self):
         class NoSeek:

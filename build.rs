@@ -67,9 +67,10 @@ impl Combination {
             methods.push("read");
         }
         if self.has(4) {
-            // A writable `PyFile` hands out a flush, so the object needs one whether or not the
-            // caller ever uses it.
-            methods.extend(["write", "flush"]);
+            // `flush` is deliberately absent: a `Protocol` cannot mark a member optional, and the
+            // implementation only calls it when the object has one, so requiring it here would
+            // reject minimal writers the runtime is perfectly happy with.
+            methods.push("write");
         }
         if self.has(2) {
             methods.push("seek");

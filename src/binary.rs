@@ -8,6 +8,7 @@ use crate::{Binary, PyFile};
 use pyo3::intern;
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
+use pyo3::PyErr;
 use std::borrow::Cow;
 use std::io::{self, Read, Seek, SeekFrom, Write};
 
@@ -16,6 +17,21 @@ fn would_block() -> io::Error {
     io::Error::new(
         io::ErrorKind::WouldBlock,
         "the object returned None, meaning no data is available yet",
+    )
+}
+
+/// A duck-typed object that turned out to deal in the other payload after all.
+///
+/// The payload-kind check lets an object through when it says nothing about itself, which is what
+/// keeps duck typing working, so the mistake can only surface here. Say what to do about it.
+fn wrong_payload(err: PyErr) -> io::Error {
+    io::Error::new(
+        io::ErrorKind::InvalidData,
+        format!(
+            "read() did not return bytes ({err}). This is a binary file-like object, and the \
+             object did not identify itself as text, so it was taken at its word. If it deals in \
+             str, ask for it as a text PyFile, or wrap it with io.TextIOWrapper on the Python side."
+        ),
     )
 }
 
@@ -39,7 +55,7 @@ impl<const WRITE: bool, const SEEK: bool, const FILENO: bool> Read
             if res.is_none() {
                 return Err(would_block());
             }
-            let bytes = res.extract::<Cow<'_, [u8]>>()?;
+            let bytes = res.extract::<Cow<'_, [u8]>>().map_err(wrong_payload)?;
             if bytes.len() > buf.len() {
                 return Err(too_much(bytes.len(), buf.len()));
             }
@@ -65,7 +81,7 @@ impl<const WRITE: bool, const SEEK: bool, const FILENO: bool> Read
                 }
                 // Borrowed from the Python object and copied straight into `out`: extracting an
                 // owned `Vec` first would copy the whole stream an extra time.
-                let chunk = res.extract::<Cow<'_, [u8]>>()?;
+                let chunk = res.extract::<Cow<'_, [u8]>>().map_err(wrong_payload)?;
                 if chunk.is_empty() {
                     break;
                 }
@@ -115,10 +131,17 @@ impl<const READ: bool, const SEEK: bool, const FILENO: bool> Write
         })
     }
 
+    /// Flushes the object, or does nothing if it has no `flush`.
+    ///
+    /// An object with no `flush` has nothing to flush, so requiring one would turn away every
+    /// minimal writer that implements nothing else.
     fn flush(&mut self) -> io::Result<()> {
         Python::attach(|py| {
             let obj = self.as_py_object().bind(py);
-            obj.call_method0(intern!(py, "flush"))?;
+            let flush = intern!(py, "flush");
+            if obj.hasattr(flush)? {
+                obj.call_method0(flush)?;
+            }
             Ok(())
         })
     }

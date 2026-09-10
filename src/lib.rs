@@ -67,28 +67,105 @@ impl<M, const READ: bool, const WRITE: bool, const SEEK: bool, const FILENO: boo
 fn cached_type<'py>(
     py: Python<'py>,
     cell: &'static PyOnceLock<Py<PyAny>>,
+    module: &str,
     name: &str,
 ) -> PyResult<&'py Bound<'py, PyAny>> {
-    cell.get_or_try_init(py, || Ok(py.import("io")?.getattr(name)?.unbind()))
+    cell.get_or_try_init(py, || Ok(py.import(module)?.getattr(name)?.unbind()))
         .map(|obj| obj.bind(py))
 }
 
-/// `io.TextIOBase`, the base of every stream whose `read` yields `str`.
-fn text_io_base<'py>(py: Python<'py>) -> PyResult<&'py Bound<'py, PyAny>> {
-    static CELL: PyOnceLock<Py<PyAny>> = PyOnceLock::new();
-    cached_type(py, &CELL, "TextIOBase")
+/// Declares a lazily imported, cached type object.
+macro_rules! cached {
+    ($name:ident, $module:literal, $attr:literal) => {
+        fn $name<'py>(py: Python<'py>) -> PyResult<&'py Bound<'py, PyAny>> {
+            static CELL: PyOnceLock<Py<PyAny>> = PyOnceLock::new();
+            cached_type(py, &CELL, $module, $attr)
+        }
+    };
 }
 
-/// `io.RawIOBase`, one of the two bases of streams whose `read` yields `bytes`.
-fn raw_io_base<'py>(py: Python<'py>) -> PyResult<&'py Bound<'py, PyAny>> {
-    static CELL: PyOnceLock<Py<PyAny>> = PyOnceLock::new();
-    cached_type(py, &CELL, "RawIOBase")
+cached!(text_io_base, "io", "TextIOBase");
+cached!(raw_io_base, "io", "RawIOBase");
+cached!(buffered_io_base, "io", "BufferedIOBase");
+cached!(codecs_stream_reader, "codecs", "StreamReader");
+cached!(codecs_stream_writer, "codecs", "StreamWriter");
+cached!(codecs_stream_reader_writer, "codecs", "StreamReaderWriter");
+
+/// What an object says about the kind of payload it deals in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Payload {
+    /// Definitely `bytes`.
+    Binary,
+    /// Definitely `str`.
+    Text,
+    /// The object said nothing either way, so it is taken at its word.
+    Unknown,
 }
 
-/// `io.BufferedIOBase`, the other one.
-fn buffered_io_base<'py>(py: Python<'py>) -> PyResult<&'py Bound<'py, PyAny>> {
-    static CELL: PyOnceLock<Py<PyAny>> = PyOnceLock::new();
-    cached_type(py, &CELL, "BufferedIOBase")
+/// Works out what an object deals in, preferring the most explicit evidence available.
+///
+/// The ladder matters, because the cheap signals are the unreliable ones. `codecs.getreader(..)`
+/// wraps a binary file and reports *its* `mode` of `"rb"` while producing `str`, so anything that
+/// consulted `mode` first would get it exactly backwards. Each rung is only reached when the ones
+/// above it had nothing to say, and the last rung is "say nothing and let the object through",
+/// which is what keeps duck-typed objects working.
+///
+/// The returned string explains which rung fired, so a rejection can say why.
+fn classify(obj: &Bound<'_, PyAny>) -> PyResult<(Payload, &'static str)> {
+    let py = obj.py();
+
+    // 1. The `io` hierarchy. Definitive, and covers nearly every object from the standard library.
+    if obj.is_instance(text_io_base(py)?)? {
+        return Ok((Payload::Text, "it is an io.TextIOBase"));
+    }
+    if obj.is_instance(raw_io_base(py)?)? || obj.is_instance(buffered_io_base(py)?)? {
+        return Ok((
+            Payload::Binary,
+            "it is an io.RawIOBase or io.BufferedIOBase",
+        ));
+    }
+
+    // 2. The `codecs` stream wrappers. Outside the `io` hierarchy entirely, and they decode to
+    //    `str`, so they have to be recognised before `mode` is consulted.
+    for codecs_type in [
+        codecs_stream_reader(py)?,
+        codecs_stream_writer(py)?,
+        codecs_stream_reader_writer(py)?,
+    ] {
+        if obj.is_instance(codecs_type)? {
+            return Ok((Payload::Text, "it is a codecs stream wrapper"));
+        }
+    }
+
+    // 3. A `str` encoding. Only a text stream has one to report.
+    if let Some(encoding) = optional_attr(obj, intern!(py, "encoding")) {
+        if encoding.is_instance_of::<PyString>() {
+            return Ok((Payload::Text, "it has a str `encoding` attribute"));
+        }
+    }
+
+    // 4. A self-declared `mode`. This is what `tempfile.SpooledTemporaryFile` leaves to go on,
+    //    since it derives from `io.IOBase` without saying which half.
+    if let Some(mode) = optional_attr(obj, intern!(py, "mode")) {
+        if let Ok(mode) = mode.extract::<std::borrow::Cow<'_, str>>() {
+            return Ok(if mode.contains('b') {
+                (Payload::Binary, "its `mode` attribute contains 'b'")
+            } else {
+                (Payload::Text, "its `mode` attribute does not contain 'b'")
+            });
+        }
+    }
+
+    // 5. Nothing said. Duck typing decides, and the capability checks are the only requirement.
+    Ok((Payload::Unknown, "it is duck typed"))
+}
+
+/// An attribute if it is there, and `None` for anything else, including a property that raises.
+fn optional_attr<'py>(
+    obj: &Bound<'py, PyAny>,
+    name: &Bound<'py, PyString>,
+) -> Option<Bound<'py, PyAny>> {
+    obj.getattr(name).ok()
 }
 
 impl<M, const READ: bool, const WRITE: bool, const SEEK: bool, const FILENO: bool>
@@ -117,27 +194,22 @@ where
     }
 
     fn check_mode(obj: &Bound<'_, PyAny>) -> PyResult<()> {
-        let py = obj.py();
-        if M::IS_TEXT {
-            let binary =
-                obj.is_instance(raw_io_base(py)?)? || obj.is_instance(buffered_io_base(py)?)?;
-            if binary {
-                return Err(PyTypeError::new_err(format!(
-                    "expected a text file-like object, got the binary object {}. \
-                     Wrap it with io.TextIOWrapper(obj, encoding=...), which is where the choice \
-                     of encoding belongs, or open the file in text mode.",
-                    obj.get_type().name()?
-                )));
-            }
-        } else if obj.is_instance(text_io_base(py)?)? {
-            return Err(PyTypeError::new_err(format!(
-                "expected a binary file-like object, got the text object {}. \
+        let (payload, why) = classify(obj)?;
+        let name = obj.get_type().name()?;
+        match (M::IS_TEXT, payload) {
+            // Agrees, or the object said nothing and is taken at its word.
+            (_, Payload::Unknown) | (true, Payload::Text) | (false, Payload::Binary) => Ok(()),
+            (false, Payload::Text) => Err(PyTypeError::new_err(format!(
+                "expected a binary file-like object, got the text object {name} ({why}). \
                  Pass obj.buffer to get at the bytes underneath, or open the file in binary mode. \
-                 Decoding text and re-encoding it here would not round-trip the file's bytes.",
-                obj.get_type().name()?
-            )));
+                 Decoding text and re-encoding it here would not round-trip the file's bytes."
+            ))),
+            (true, Payload::Binary) => Err(PyTypeError::new_err(format!(
+                "expected a text file-like object, got the binary object {name} ({why}). \
+                 Wrap it with io.TextIOWrapper(obj, encoding=...), which is where the choice \
+                 of encoding belongs, or open the file in text mode."
+            ))),
         }
-        Ok(())
     }
 
     fn check_capabilities(obj: &Bound<'_, PyAny>) -> PyResult<()> {
@@ -158,8 +230,9 @@ where
         }
         if WRITE {
             require(intern!(py, "write"))?;
-            // Writing hands out a flush, so the object needs one whether or not it is ever called
-            require(intern!(py, "flush"))?;
+            // `flush` is deliberately not required. An object that has none has nothing to flush,
+            // so flushing it is a no-op rather than an error, and demanding it would turn away
+            // every minimal writer that implements nothing but `write`.
         }
         if SEEK {
             require(intern!(py, "seek"))?;

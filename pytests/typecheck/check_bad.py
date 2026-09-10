@@ -18,11 +18,6 @@ class ReadsBytes:
         return b""
 
 
-class WritesTextNoFlush:
-    def write(self, data: str, /) -> int:
-        return 0
-
-
 class ReadsBytesWritesText:
     def read(self, size: int, /) -> bytes:
         return b""
@@ -56,20 +51,17 @@ ext.text_read_all(ReadsBytes())
 # 5. no read at all
 ext.binary_read_all(object())
 
-# 6. writes but never flushes, and a writable file will be flushed
-ext.text_write(WritesTextNoFlush(), "x")
-
-# 7. reads bytes but writes text: consistent with neither kind
+# 6. reads bytes but writes text: consistent with neither kind
 ext.binary_read_write(ReadsBytesWritesText(), b"x")
 
-# 8. text seeking needs tell, because the positions are opaque cookies
+# 7. text seeking needs tell, because the positions are opaque cookies
 ext.text_seek_roundtrip(SeeksWithoutTell(), 1)
 
-# 9. a read-only object where writing is required
+# 8. a read-only object where writing is required
 ext.binary_write(ReadsBytes(), b"x")
 
-# 10. no fileno
+# 9. no fileno
 ext.binary_fileno(ReadsBytes())
 
-# 11. wrong argument type entirely
+# 10. wrong argument type entirely
 ext.binary_write(io.BytesIO(), "not bytes")

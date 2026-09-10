@@ -31,15 +31,15 @@ step "pytest: runtime behaviour, comparisons, stub snapshot"
 step "pyright: check_ok.py must have 0 errors"
 (cd "$here/typecheck" && pyright check_ok.py 2>/dev/null)
 
-step "pyright: check_bad.py must have 11 errors, one per rule"
+step "pyright: check_bad.py must have 10 errors, one per rule"
 # pyright exits non-zero when it finds errors, which is the point here.
 report=$(cd "$here/typecheck" && pyright --outputjson check_bad.py 2>/dev/null || true)
 count=$(printf '%s' "$report" | python3 -c 'import json,sys; print(json.load(sys.stdin)["summary"]["errorCount"])')
-if [ "$count" != "11" ]; then
-    echo "expected 11 errors from check_bad.py, got $count" >&2
+if [ "$count" != "10" ]; then
+    echo "expected 10 errors from check_bad.py, got $count" >&2
     exit 1
 fi
-echo "11 errors, as expected"
+echo "10 errors, as expected"
 
 step "benchmark against pyo3-file"
 (cd "$here" && uvx --with pytest python bench.py)

@@ -8,6 +8,7 @@
 use crate::{PyFile, Text};
 use pyo3::intern;
 use pyo3::prelude::*;
+use pyo3::PyErr;
 use std::borrow::Cow;
 use std::io;
 
@@ -15,6 +16,18 @@ fn would_block() -> io::Error {
     io::Error::new(
         io::ErrorKind::WouldBlock,
         "the object returned None, meaning no data is available yet",
+    )
+}
+
+/// A duck-typed object that turned out to deal in the other payload after all.
+fn wrong_payload(err: PyErr) -> io::Error {
+    io::Error::new(
+        io::ErrorKind::InvalidData,
+        format!(
+            "read() did not return str ({err}). This is a text file-like object, and the object \
+             did not identify itself as binary, so it was taken at its word. If it deals in bytes, \
+             ask for it as a binary PyFile, or wrap it with io.TextIOWrapper on the Python side."
+        ),
     )
 }
 
@@ -58,7 +71,10 @@ impl<const WRITE: bool, const SEEK: bool, const FILENO: bool>
             if res.is_none() {
                 return Err(would_block());
             }
-            Ok(res.extract::<Cow<'_, str>>()?.into_owned())
+            Ok(res
+                .extract::<Cow<'_, str>>()
+                .map_err(wrong_payload)?
+                .into_owned())
         })
     }
 }
@@ -109,11 +125,17 @@ impl<const READ: bool, const SEEK: bool, const FILENO: bool>
         Ok(())
     }
 
-    /// Flushes the object.
+    /// Flushes the object, or does nothing if it has no `flush`.
+    ///
+    /// An object with no `flush` has nothing to flush, so requiring one would turn away every
+    /// minimal writer that implements nothing else.
     pub fn flush(&mut self) -> io::Result<()> {
         Python::attach(|py| {
             let obj = self.as_py_object().bind(py);
-            obj.call_method0(intern!(py, "flush"))?;
+            let flush = intern!(py, "flush");
+            if obj.hasattr(flush)? {
+                obj.call_method0(flush)?;
+            }
             Ok(())
         })
     }

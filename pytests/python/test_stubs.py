@@ -56,11 +56,10 @@ class TestStubContent:
         assert "def write(self, data: bytes, /) -> int: ..." in stub_source
         assert "def write(self, data: str, /) -> int: ..." in stub_source
 
-    def test_writing_protocols_require_flush(self, stub_source):
-        blocks = stub_source.split("class ")
-        for block in blocks:
-            if "def write(" in block:
-                assert "def flush(" in block, f"write without flush in: {block.splitlines()[0]}"
+    def test_writing_protocols_do_not_require_flush(self, stub_source):
+        """`flush` is called only when the object has one, so demanding it in the protocol would
+        reject minimal writers the runtime accepts. A `Protocol` cannot say "optional"."""
+        assert "def flush(" not in stub_source
 
     def test_text_seeking_requires_tell(self, stub_source):
         block = stub_source.split("class SupportsTextReadSeek(Protocol):")[1].split("\nclass ")[0]

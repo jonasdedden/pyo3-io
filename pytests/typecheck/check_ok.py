@@ -52,6 +52,13 @@ class DuckTextReader:
 
 
 class DuckBinaryWriter:
+    """No `flush`: it is called only when present, so the protocol does not demand one."""
+
+    def write(self, data: bytes, /) -> int:
+        return 0
+
+
+class DuckBinaryWriterWithFlush:
     def write(self, data: bytes, /) -> int:
         return 0
 
@@ -72,6 +79,7 @@ class DuckTextSeeker:
 ext.binary_read_all(DuckBinaryReader())
 ext.text_read_all(DuckTextReader())
 ext.binary_write(DuckBinaryWriter(), b"x")
+ext.binary_write(DuckBinaryWriterWithFlush(), b"x")
 ext.text_seek_roundtrip(DuckTextSeeker(), 1)
 
 
@@ -82,8 +90,6 @@ class Everything:
 
     def write(self, data: bytes, /) -> int:
         return 0
-
-    def flush(self) -> None: ...
 
     def seek(self, offset: int, whence: int, /) -> int:
         return 0
