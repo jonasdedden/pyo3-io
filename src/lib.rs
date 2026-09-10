@@ -122,9 +122,25 @@ macro_rules! cached {
     };
 }
 
+/// Declares a lazily imported type that may not exist on this Python version.
+macro_rules! cached_optional {
+    ($name:ident, $module:literal, $attr:literal) => {
+        fn $name<'py>(py: Python<'py>) -> PyResult<Option<&'py Bound<'py, PyAny>>> {
+            static CELL: PyOnceLock<Option<Py<PyAny>>> = PyOnceLock::new();
+            let cell = CELL.get_or_try_init(py, || -> PyResult<_> {
+                Ok(py.import($module)?.getattr($attr).ok().map(Bound::unbind))
+            })?;
+            Ok(cell.as_ref().map(|obj| obj.bind(py)))
+        }
+    };
+}
+
 cached!(text_io_base, "io", "TextIOBase");
 cached!(raw_io_base, "io", "RawIOBase");
 cached!(buffered_io_base, "io", "BufferedIOBase");
+// New in Python 3.14, so absent on everything older.
+cached_optional!(io_reader, "io", "Reader");
+cached_optional!(io_writer, "io", "Writer");
 
 /// What an object says about the kind of payload it deals in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -251,21 +267,44 @@ where
 
     fn check_capabilities(obj: &Bound<'_, PyAny>) -> Result<(), Error> {
         let py = obj.py();
+        let missing = |method: &'static str| -> Result<Error, PyErr> {
+            Ok(Error::MissingMethod {
+                type_name: obj.get_type().name()?.to_string(),
+                method,
+            })
+        };
         let require = |name: &Bound<'_, PyString>, method: &'static str| -> Result<(), Error> {
             if obj.hasattr(name)? {
                 Ok(())
             } else {
-                Err(Error::MissingMethod {
-                    type_name: obj.get_type().name()?.to_string(),
-                    method,
-                })
+                Err(missing(method)?)
+            }
+        };
+        // `io.Reader` and `io.Writer`, new in 3.14, are ABCs whose `__subclasshook__` looks for
+        // the method on the *class*. That is not the same question `hasattr` asks, and the two
+        // disagree in both directions: a `read` served by `__getattr__` satisfies `hasattr` but
+        // not the ABC, and a class passed to `io.Reader.register(..)` satisfies the ABC while
+        // having no `read` at all. Either is a good enough answer -- one is a working
+        // implementation, the other an explicit declaration -- so this accepts either, which is
+        // wider than `hasattr` alone and never narrower.
+        let require_protocol = |protocol: Option<&Bound<'_, PyAny>>,
+                                name: &Bound<'_, PyString>,
+                                method: &'static str|
+         -> Result<(), Error> {
+            if obj.hasattr(name)? {
+                return Ok(());
+            }
+            match protocol {
+                // Python 3.14 or newer: an explicit registration counts.
+                Some(protocol) if obj.is_instance(protocol)? => Ok(()),
+                _ => Err(missing(method)?),
             }
         };
         if READ {
-            require(intern!(py, "read"), "read")?;
+            require_protocol(io_reader(py)?, intern!(py, "read"), "read")?;
         }
         if WRITE {
-            require(intern!(py, "write"), "write")?;
+            require_protocol(io_writer(py)?, intern!(py, "write"), "write")?;
             // `flush` is deliberately not required. An object that has none has nothing to flush,
             // so flushing it is a no-op rather than an error, and demanding it would turn away
             // every minimal writer that implements nothing but `write`.

@@ -126,6 +126,28 @@ Nothing is both. The shortcut of testing `IOBase` and not `TextIOBase` would col
 one check and be wrong: `tempfile.SpooledTemporaryFile` derives from `IOBase` alone, so the
 `mode="w+"` form would be called binary when it reads `str`.
 
+#### The capability checks
+
+Every method the Rust side will call is looked for up front, with `hasattr`. On Python 3.14 and
+newer, `io.Reader` and `io.Writer` are accepted as an alternative answer for `read` and `write`.
+
+Despite how typeshed spells them, they are not `typing` Protocols: they are C-implemented ABCs
+whose `__subclasshook__` looks for the method on the *class*. That is a different question from
+the one `hasattr` asks, and the two disagree in both directions:
+
+| | `hasattr` | `isinstance(.., io.Reader)` |
+|---|---|---|
+| `read` served by `__getattr__` | yes | no — the hook inspects the class |
+| `io.Reader.register(Cls)`, no `read` | no | yes — an explicit declaration |
+
+So either answer counts. One is a working implementation and the other is the class author saying
+so on purpose; requiring both would turn away a `__getattr__`-based reader that works today. This
+is wider than `hasattr` alone and never narrower.
+
+They say nothing about the payload kind, incidentally — `isinstance` against a parameterised
+generic raises, so `io.Reader[bytes]` is not a question that can be asked at runtime. They are a
+presence check, not a classification.
+
 **Nothing is called on the object during extraction.** That rules out the two things that would
 otherwise classify far more of them:
 
@@ -425,7 +447,7 @@ its classes belong. The `pyo3` crate itself needs no change.
   does, for all thirty aliases.
 - **3 comparison tests** (`tests/comparison.rs`) — the type-level claims the table above makes
   about `pyo3-filelike`, so it fails rather than going quietly out of date.
-- **190 runtime tests** (`pytests/python/`) — payload round-tripping, character-vs-byte counting,
+- **197 runtime tests** (`pytests/python/`) — payload round-tripping, character-vs-byte counting,
   the classification ladder against every standard-library file-like object, capability checks,
   misbehaving objects, and two files of side-by-side comparisons asserting both what `pyo3-file`
   and `pyo3-filelike` do today and what this crate does instead.

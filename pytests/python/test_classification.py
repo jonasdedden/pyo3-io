@@ -433,3 +433,83 @@ class TestWhyBothBinaryBasesAreNamed:
         # The shortcut's verdict would be "binary", which is wrong. The real ladder gives no
         # verdict at all, so the object is taken at its word and works.
         assert ext.text_read_chars(handle, 4) == TEXT[:4]
+
+
+IO_PROTOCOLS = hasattr(io, "Reader") and hasattr(io, "Writer")
+
+
+@pytest.mark.skipif(not IO_PROTOCOLS, reason="io.Reader/io.Writer are new in Python 3.14")
+class TestIoReaderAndWriter:
+    """`io.Reader` and `io.Writer`, new in 3.14, accepted alongside `hasattr`.
+
+    They are not `typing` Protocols despite how typeshed spells them: they are C-implemented ABCs
+    whose `__subclasshook__` looks for the method on the *class*. That is a different question
+    from the one `hasattr` asks, and the two disagree in both directions, so either answer counts.
+    """
+
+    def test_what_they_actually_are(self):
+        import abc
+
+        assert isinstance(io.Reader, abc.ABCMeta)
+        assert not getattr(io.Reader, "_is_protocol", False)
+        assert not getattr(io.Reader, "_is_runtime_protocol", False)
+
+    def test_they_cannot_be_subscripted_for_isinstance(self):
+        """So they say nothing about the payload kind, only that a method is there."""
+        with pytest.raises(TypeError, match="parameterized generic"):
+            isinstance(io.BytesIO(), io.Reader[bytes])
+
+    def test_a_registered_class_is_accepted_without_the_method(self):
+        """`hasattr` says no; the explicit registration is taken as the answer."""
+
+        class DeclaresItself:
+            def __getattr__(self, name):
+                if name == "read":
+                    return lambda size=-1, /: BYTES[:size] if size >= 0 else BYTES
+                raise AttributeError(name)
+
+        io.Reader.register(DeclaresItself)
+        assert not type(DeclaresItself()).__dict__.get("read")
+        assert isinstance(DeclaresItself(), io.Reader)
+        assert ext.binary_read_exactly(DeclaresItself(), 4) == BYTES[:4]
+
+    def test_a_getattr_reader_is_accepted_without_the_registration(self):
+        """The ABC says no, because the hook inspects the class; `hasattr` says yes."""
+
+        class DynamicRead:
+            def __getattr__(self, name):
+                if name == "read":
+                    return lambda size=-1, /: BYTES[:size] if size >= 0 else BYTES
+                raise AttributeError(name)
+
+        assert not isinstance(DynamicRead(), io.Reader)
+        assert hasattr(DynamicRead(), "read")
+        assert ext.binary_read_exactly(DynamicRead(), 4) == BYTES[:4]
+
+    def test_neither_still_means_no(self):
+        with pytest.raises(TypeError, match=r"has no \.read\(\) method"):
+            ext.binary_read_all(object())
+
+    def test_the_same_for_writers(self):
+        class DeclaresItself:
+            def __init__(self):
+                self.written = b""
+
+            def __getattr__(self, name):
+                if name == "write":
+                    def write(data, /):
+                        self.written += data
+                        return len(data)
+
+                    return write
+                raise AttributeError(name)
+
+        io.Writer.register(DeclaresItself)
+        writer = DeclaresItself()
+        ext.binary_write(writer, BYTES)
+        assert writer.written == BYTES
+
+    def test_real_file_objects_satisfy_them(self, files):
+        for name, factory in binary_factories(files).items():
+            handle = factory()
+            assert isinstance(handle, io.Reader) or hasattr(handle, "read"), name
