@@ -71,10 +71,15 @@ class TestStubContent:
         assert "def tell(" not in block
 
     def test_untyped_entry_points_degrade_to_any(self, stub_source):
-        """The pyo3-file comparison functions, showing what is lost without the typed wrapper."""
+        """Neither `pyo3-file` nor `pyo3-filelike` implements `FromPyObject`, so their entry
+        points take `Bound<PyAny>` and the stub can say nothing about them."""
         assert "def legacy_read_all(obj: Any) -> bytes" in stub_source
+        assert "def filelike_read_all(obj: Any) -> bytes" in stub_source
 
     def test_every_typed_entry_point_is_annotated(self, stub_source):
+        # `legacy_` is pyo3-file and `filelike_` is pyo3-filelike; they are the comparison
+        # functions and are expected to be `Any`.
+        comparison = ("def legacy_", "def filelike_")
         for line in stub_source.splitlines():
-            if line.startswith("def ") and not line.startswith("def legacy_"):
+            if line.startswith("def ") and not line.startswith(comparison):
                 assert ": Supports" in line or ": int" in line or ": bytes" in line or ": str" in line, line

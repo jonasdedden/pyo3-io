@@ -181,6 +181,73 @@ fn legacy_write(obj: Bound<'_, PyAny>, data: &[u8]) -> PyResult<usize> {
     Ok(data.len())
 }
 
+// ------------------------------------------------- pyo3-filelike, for comparison
+
+/// `pyo3-filelike` splits binary and text into two types, so this is the closest equivalent of
+/// [`binary_read_all`]. `PyBinaryFile::new` is private, so `From` is the only way in and its
+/// `unwrap` turns a rejected file into a panic.
+#[pyfunction]
+fn filelike_read_all(py: Python<'_>, obj: Bound<'_, PyAny>) -> PyResult<Py<PyBytes>> {
+    let mut file = pyo3_filelike::PyBinaryFile::from(obj);
+    let mut buffer = Vec::new();
+    file.read_to_end(&mut buffer)?;
+    Ok(PyBytes::new(py, &buffer).unbind())
+}
+
+/// A single fixed-size read through `PyBinaryFile`.
+#[pyfunction]
+fn filelike_read_once(py: Python<'_>, obj: Bound<'_, PyAny>) -> PyResult<Py<PyBytes>> {
+    let mut file = pyo3_filelike::PyBinaryFile::from(obj);
+    let mut buffer = vec![0u8; 4096];
+    let read = file.read(&mut buffer)?;
+    buffer.truncate(read);
+    Ok(PyBytes::new(py, &buffer).unbind())
+}
+
+/// `PyTextFile` implements `std::io::Read`, so a text object still reaches a bytes-oriented
+/// consumer, re-encoded as UTF-8. This is what that consumer receives.
+#[pyfunction]
+fn filelike_text_as_bytes(py: Python<'_>, obj: Bound<'_, PyAny>) -> PyResult<Py<PyBytes>> {
+    let mut file = pyo3_filelike::PyTextFile::from(obj);
+    let mut buffer = vec![0u8; 4096];
+    let read = file.read(&mut buffer)?;
+    buffer.truncate(read);
+    Ok(PyBytes::new(py, &buffer).unbind())
+}
+
+/// Whole-stream read through `PyTextFile`, for the benchmark.
+#[pyfunction]
+fn filelike_text_read_all(obj: Bound<'_, PyAny>) -> PyResult<String> {
+    let mut file = pyo3_filelike::PyTextFile::from(obj);
+    let mut text = String::new();
+    file.read_to_string(&mut text)?;
+    Ok(text)
+}
+
+/// `pyo3-filelike` exposes the descriptor through `AsFd`, which cannot report failure.
+#[pyfunction]
+fn filelike_fileno(obj: Bound<'_, PyAny>) -> PyResult<i32> {
+    #[cfg(unix)]
+    {
+        use std::os::fd::{AsFd, AsRawFd};
+        let file = pyo3_filelike::PyBinaryFile::from(obj);
+        Ok(file.as_fd().as_raw_fd())
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = obj;
+        Ok(-1)
+    }
+}
+
+/// `PyBinaryFile` implements `Write` unconditionally, whatever the caller asked for.
+#[pyfunction]
+fn filelike_write(obj: Bound<'_, PyAny>, data: &[u8]) -> PyResult<usize> {
+    let mut file = pyo3_filelike::PyBinaryFile::from(obj);
+    file.write_all(data)?;
+    Ok(data.len())
+}
+
 #[pymodule]
 mod pyo3_file_typed_tests {
     #[pymodule_export]
@@ -188,6 +255,7 @@ mod pyo3_file_typed_tests {
         binary_everything, binary_fileno, binary_read_all, binary_read_exactly, binary_read_write,
         binary_seek_roundtrip, binary_write, legacy_fileno, legacy_read_all,
         legacy_read_all_text, legacy_read_chars, legacy_read_once, legacy_write, text_fileno, text_read_all, text_read_chars,
-        text_read_write, text_seek_roundtrip, text_write,
+        filelike_fileno, filelike_read_all, filelike_read_once, filelike_text_as_bytes,
+        filelike_text_read_all, filelike_write, text_read_write, text_seek_roundtrip, text_write,
     };
 }

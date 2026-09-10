@@ -12,6 +12,7 @@ pyo3 = { path = "../../pyo3", features = ["extension-module", "experimental-insp
 pyo3-file-typed = { path = "..", features = ["experimental-inspect"] }
 # For the side-by-side benchmark against the untyped interface
 pyo3-file = { path = "../../pyo3-file" }
+pyo3-filelike = "0.5.3"
 
 # pyo3-file depends on pyo3 from crates.io; without this the binary would contain two
 # incompatible pyo3 crates.

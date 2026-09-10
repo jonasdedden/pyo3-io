@@ -20,6 +20,12 @@ pyo3 = { path = "../pyo3" }
 
 [dev-dependencies]
 trybuild = "1.0"
+# Only for tests/comparison.rs, which checks the claims the README makes about it.
+pyo3-filelike = "0.5.3"
+
+# pyo3-filelike resolves pyo3 from crates.io; without this the test build would contain two.
+[patch.crates-io]
+pyo3 = { path = "../pyo3" }
 
 [lints.rust]
 missing_docs = "warn"

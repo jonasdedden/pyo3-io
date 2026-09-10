@@ -32,6 +32,31 @@ def count_lines(source: SupportsTextReadSeek) -> int: ...
 Nothing about that requires the caller to write stub-related code. Enabling `experimental-inspect`
 on `pyo3` and on this crate is the whole opt-in.
 
+## Against the two existing crates
+
+|  | `pyo3-file` | `pyo3-filelike` | this crate |
+|---|---|---|---|
+| payload kind is static | no | **yes**, two types | yes |
+| kind decided by | `isinstance(obj, io.TextIOBase)` | `mode` attribute, binary if absent | the Rust type; nothing to detect |
+| text reachable through `io::Read` | yes | yes | **no** |
+| a text handle round-trips the file's bytes | no | no | **n/a — refused** |
+| text reads work at every length | no | **yes** | yes |
+| character-counted text API | no | no | **yes** |
+| text seeking | `io::Seek`, wrong | **absent**, correct | cookie API |
+| capabilities in the type | no | no | **yes** |
+| rejection is | n/a | a panic | a `TypeError` |
+| `fileno` failure is | a panic | a panic | an `io::Error` |
+| implements `FromPyObject` | yes | **no** | yes |
+| type stub says | `Any` | `Any` | an exact `Protocol` |
+
+`pyo3-filelike` is much the closer of the two, and the rows it wins are ones `pyo3-file` gets
+badly wrong. What is left is that the split stops at the type name: `PyTextFile` still implements
+`std::io::Read`, so a text object still reaches a bytes-oriented consumer re-encoded as UTF-8, and
+the latin-1 file below arrives as 48 bytes it does not contain. Its kind check is also a heuristic
+— `mode` must be present and contain `b`, and anything without a `mode` attribute is assumed
+binary, so `io.StringIO` and every duck-typed `-> str` reader get through and fail later at the
+extraction. `tests/comparison.rs` asserts the two type-level claims so this table cannot go stale.
+
 ## Why not `pyo3-file`
 
 `pyo3-file` has one type, `PyFileLikeObject`, that adapts to whatever it is given. It decides
@@ -117,27 +142,32 @@ The capability order is always read, write, seek, fileno.
 Making the kind static removes work rather than adding it. Measured with `pytests/bench.py`:
 
 ```text
-                                        typed    pyo3-file
+                             typed   pyo3-file    filelike   vs file vs flike
 
 binary: read a whole stream
-  4 KiB                                 1.7 us       4.5 us   2.67x faster
-  64 KiB                                4.1 us      11.8 us   2.89x faster
-  1024 KiB                             64.2 us     139.9 us   2.18x faster
-  8192 KiB                            522.8 us    1359.2 us   2.60x faster
+  4 KiB                     1.7 us      4.3 us      4.9 us     2.47x    2.78x
+  64 KiB                    3.8 us     11.2 us     11.7 us     2.91x    3.06x
+  1024 KiB                 58.8 us    134.0 us    134.6 us     2.28x    2.29x
+  8192 KiB                497.1 us   1286.4 us   1284.5 us     2.59x    2.58x
 
 text: read n characters
-  16384 chars                           6.3 us       7.3 us   1.15x faster
-  262144 chars                         74.6 us     107.1 us   1.44x faster
+  16384 chars               5.4 us      6.4 us         n/a     1.18x           filelike: bytes only
+  262144 chars             64.8 us     88.2 us         n/a     1.36x           filelike: bytes only
 
 text: read a whole stream
-  1024 KiB                            447.3 us         n/a    pyo3-file: buffer size must be at
-                                                              least 4 bytes
+  64 KiB                   19.7 us         n/a     29.7 us              1.51x  pyo3-file: 4-byte guard
+  1024 KiB                432.2 us         n/a    473.0 us              1.09x  pyo3-file: 4-byte guard
 ```
 
 Binary `read_to_end` is one `read(-1)` rather than a call per buffer-sized chunk, which is only
 safe to do because the implementation knows it is talking to a byte stream. Text reads hand a
-`str` straight across instead of encoding it to UTF-8 and validating it back again. Neither is a
-micro-optimisation bolted on; both fall out of not having to guess.
+`str` straight across instead of encoding it to UTF-8 and validating it back again — and against
+`pyo3-filelike` there is a second copy saved, since its `PyTextFile` stages everything through an
+internal `Vec<u8>` and `drain`s the front of it after every read. Neither is a micro-optimisation
+bolted on; both fall out of not having to guess.
+
+There is no measurable cost to the payload-kind check: it runs once per extraction and is two
+`isinstance` calls against cached types.
 
 ## Type stubs
 
@@ -168,9 +198,12 @@ its classes belong. The `pyo3` crate itself needs no change.
   compile error, including `io::Read` on a text file, which is the guarantee a gzip decoder wants.
 - **5 API surface tests** (`tests/api_surface.rs`) — the other half: everything that should exist
   does, for all thirty aliases.
-- **117 runtime tests** (`pytests/python/`) — payload round-tripping, character-vs-byte counting,
-  capability and payload-kind checks, misbehaving objects, and a file of side-by-side comparisons
-  asserting both what `pyo3-file` does today and what this crate does instead.
+- **3 comparison tests** (`tests/comparison.rs`) — the type-level claims the table above makes
+  about `pyo3-filelike`, so it fails rather than going quietly out of date.
+- **139 runtime tests** (`pytests/python/`) — payload round-tripping, character-vs-byte counting,
+  capability and payload-kind checks, misbehaving objects, and two files of side-by-side
+  comparisons asserting both what `pyo3-file` and `pyo3-filelike` do today and what this crate
+  does instead.
 - **Type-checker tests** (`pytests/typecheck/`) — `pyright` over a file that must produce no
   errors and one that must produce exactly eleven, one per rule.
 - **A stub snapshot** — the generated `.pyi` is checked in, so any change to it shows up in review.

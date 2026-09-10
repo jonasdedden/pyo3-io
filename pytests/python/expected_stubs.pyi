@@ -69,6 +69,39 @@ def binary_seek_roundtrip(file: SupportsBinaryReadSeek) -> bytes:
 
 def binary_write(file: SupportsBinaryWrite, data: bytes) -> int: ...
 
+def filelike_fileno(obj: Any) -> int:
+    """
+    `pyo3-filelike` exposes the descriptor through `AsFd`, which cannot report failure.
+    """
+
+def filelike_read_all(obj: Any) -> bytes:
+    """
+    `pyo3-filelike` splits binary and text into two types, so this is the closest equivalent of
+    [`binary_read_all`]. `PyBinaryFile::new` is private, so `From` is the only way in and its
+    `unwrap` turns a rejected file into a panic.
+    """
+
+def filelike_read_once(obj: Any) -> bytes:
+    """
+    A single fixed-size read through `PyBinaryFile`.
+    """
+
+def filelike_text_as_bytes(obj: Any) -> bytes:
+    """
+    `PyTextFile` implements `std::io::Read`, so a text object still reaches a bytes-oriented
+    consumer, re-encoded as UTF-8. This is what that consumer receives.
+    """
+
+def filelike_text_read_all(obj: Any) -> str:
+    """
+    Whole-stream read through `PyTextFile`, for the benchmark.
+    """
+
+def filelike_write(obj: Any, data: bytes) -> int:
+    """
+    `PyBinaryFile` implements `Write` unconditionally, whatever the caller asked for.
+    """
+
 def legacy_fileno(obj: Any) -> int:
     """
     The untyped equivalent of [`binary_fileno`]. `pyo3-file` exposes this through `AsRawFd`,
