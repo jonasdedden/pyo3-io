@@ -1,0 +1,21 @@
+[package]
+name = "pyo3_file_typed_tests"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "pyo3_file_typed_tests"
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = { path = "../../pyo3", features = ["extension-module", "experimental-inspect"] }
+pyo3-file-typed = { path = "..", features = ["experimental-inspect"] }
+# For the side-by-side benchmark against the untyped interface
+pyo3-file = { path = "../../pyo3-file" }
+
+# pyo3-file depends on pyo3 from crates.io; without this the binary would contain two
+# incompatible pyo3 crates.
+[patch.crates-io]
+pyo3 = { path = "../../pyo3" }
+
+[workspace]

@@ -1,0 +1,6 @@
+{
+  "include": ["check_ok.py", "check_bad.py"],
+  "stubPath": ".",
+  "reportMissingModuleSource": "none",
+  "typeCheckingMode": "standard"
+}

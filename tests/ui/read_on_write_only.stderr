@@ -1,0 +1,14 @@
+error[E0599]: the method `read` exists for mutable reference `&mut PyFile<pyo3_file_typed::Binary, false, true, false, false>`, but its trait bounds were not satisfied
+ --> tests/ui/read_on_write_only.rs:9:18
+  |
+9 |     let _ = file.read(&mut buffer);
+  |                  ^^^^ method cannot be called due to unsatisfied trait bounds
+  |
+ ::: src/lib.rs
+  |
+  | pub struct PyFile<M, const READ: bool, const WRITE: bool, const SEEK: bool, const FILENO: bool> {
+  | ----------------------------------------------------------------------------------------------- doesn't satisfy `_: Read`
+  |
+  = note: the following trait bounds were not satisfied:
+          `PyFile<pyo3_file_typed::Binary, false, true, false, false>: std::io::Read`
+          which is required by `&mut PyFile<pyo3_file_typed::Binary, false, true, false, false>: std::io::Read`

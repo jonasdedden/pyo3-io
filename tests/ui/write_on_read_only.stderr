@@ -1,0 +1,14 @@
+error[E0599]: the method `write` exists for mutable reference `&mut PyFile<pyo3_file_typed::Binary, true, false, false, false>`, but its trait bounds were not satisfied
+ --> tests/ui/write_on_read_only.rs:8:18
+  |
+8 |     let _ = file.write(b"nope");
+  |                  ^^^^^ method cannot be called due to unsatisfied trait bounds
+  |
+ ::: src/lib.rs
+  |
+  | pub struct PyFile<M, const READ: bool, const WRITE: bool, const SEEK: bool, const FILENO: bool> {
+  | ----------------------------------------------------------------------------------------------- doesn't satisfy `_: Write`
+  |
+  = note: the following trait bounds were not satisfied:
+          `PyFile<pyo3_file_typed::Binary, true, false, false, false>: std::io::Write`
+          which is required by `&mut PyFile<pyo3_file_typed::Binary, true, false, false, false>: std::io::Write`

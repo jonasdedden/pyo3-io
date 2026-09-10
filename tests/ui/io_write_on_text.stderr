@@ -1,0 +1,14 @@
+error[E0599]: the method `write` exists for mutable reference `&mut PyFile<Text, false, true, false, false>`, but its trait bounds were not satisfied
+ --> tests/ui/io_write_on_text.rs:8:18
+  |
+8 |     let _ = file.write(b"bytes");
+  |                  ^^^^^
+  |
+ ::: src/lib.rs
+  |
+  | pub struct PyFile<M, const READ: bool, const WRITE: bool, const SEEK: bool, const FILENO: bool> {
+  | ----------------------------------------------------------------------------------------------- doesn't satisfy `_: Write`
+  |
+  = note: the following trait bounds were not satisfied:
+          `PyFile<Text, false, true, false, false>: std::io::Write`
+          which is required by `&mut PyFile<Text, false, true, false, false>: std::io::Write`

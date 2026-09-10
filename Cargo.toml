@@ -1,0 +1,25 @@
+[package]
+name = "pyo3-file-typed"
+version = "0.1.0"
+edition = "2021"
+description = "Python file-like objects whose payload kind and capabilities are part of their Rust type"
+license = "MIT OR Apache-2.0"
+exclude = ["pytests"]
+
+[features]
+default = []
+# Generates a `typing.Protocol` per (payload kind, capability set) into the type stubs of
+# whichever extension consumes this crate.
+experimental-inspect = ["pyo3/experimental-inspect"]
+
+[dependencies]
+# Path dependency on the checkout carrying the `attach_to_root` support in `pyo3-introspection`,
+# branch `introspection-attach-to-root`. The `pyo3` crate itself needs no change; it is the stub
+# *generator* in that checkout that does.
+pyo3 = { path = "../pyo3" }
+
+[dev-dependencies]
+trybuild = "1.0"
+
+[lints.rust]
+missing_docs = "warn"
