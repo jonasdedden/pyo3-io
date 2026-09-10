@@ -271,29 +271,53 @@ handful of `isinstance` calls against cached types.
 The one thing not done yet is `readinto`, which would let Python fill the Rust buffer directly and
 remove the remaining copy. It needs a capability of its own, since not every object has one.
 
-### Why the io implementations attach per call
+### Two forms, the way `pyo3` does it
 
-Each `read`/`write`/`seek` opens its own `Python::attach` rather than being written against a
-GIL-bound sibling type that carries a `Python<'py>` token. Measured on this build, with the GIL
-already held:
+`pyo3`'s own types split into a marker plus the handle that has the methods: `pub struct
+PyList(PyAny)` is bare, and everything useful lives in `PyListMethods<'py>`, implemented for
+`Bound<'py, PyList>`. This crate follows that shape:
 
-```text
-  Python::attach                              2.51 ns
-  as a share of a 64-byte read through io::Read   0.62%
-  as a share of a 64 KiB read                     0.07%
+| | owns | `Send + 'static` | attaches |
+|---|---|---|---|
+| `PyFile<M, ..>` | `Py<PyAny>` | yes | once per operation |
+| `BoundFile<'py, M, ..>` | `Bound<'py, PyAny>` | no | never; it has the token |
+
+The implementations live on `BoundFile`, and `PyFile` gets the same traits by attaching once and
+delegating. So a caller that already holds the GIL says so and nothing is taken implicitly:
+
+```rust,ignore
+#[pyfunction]
+fn count(py: Python<'_>, file: BinaryRead) -> PyResult<usize> {
+    let mut file = file.into_bound(py);   // BoundBinaryRead<'py>
+    let mut sink = Vec::new();
+    Ok(file.read_to_end(&mut sink)?)
+}
 ```
 
-Even against the cheapest Python call that exists — `BytesIO.read(0)`, 15 ns, which does nothing —
-it is 14%, and nothing real is that cheap.
+Every alias has a `Bound` twin — `BoundBinaryRead<'py>`, `BoundTextReadSeek<'py>` — so the type is
+nameable when it has to be.
 
-What it buys is that a `PyFile` owns a `Py<PyAny>` instead of borrowing a `Bound<'py, _>`, so it is
-`Send` and `'static`. That is what lets it be handed to `zip::ZipArchive::new`,
-`csv::Reader::from_reader`, `io::copy`, or a thread of its own — code that has never heard of
-Python and has nowhere to put a `'py` lifetime. A GIL-bound form could not be given to any of
-them, and could not cross a thread boundary at all. `tests/api_surface.rs` pins both.
+It could not literally be `Bound<'py, PyFile>`: that needs `PyFile` to be a native type with a
+CPython type object behind it, and "any object with a `read` method" has none. `BoundFile` is the
+same idea with its own struct.
 
-A bound sibling would be a fine *addition* for a hot loop of small reads, in the shape of PyO3's
-own `Py<T>` / `Bound<'py, T>` split. At 2.5 ns it has not earned the second API.
+#### Why the detached form exists at all
+
+Attaching costs 2.51 ns with the GIL already held, which is 0.62% of a 64-byte read through
+`io::Read` and 0.07% of a 64 KiB one, so the saving is not the point. The point is that
+`BoundFile` borrows the token, which makes it neither `Send` nor `'static`, and plenty of code
+wants a reader that is both:
+
+```rust,ignore
+fn takes_owned_reader<R: Read + Send + 'static>(_: R) {}   // zip::ZipArchive::new,
+                                                            // csv::Reader::from_reader, io::copy
+std::thread::spawn(move || file.read_to_end(&mut sink))     // no token held at all
+```
+
+The thread case is the sharp one, and it works: the parent releases the GIL entirely and the child
+acquires it for the duration of each read and lets it go again. `tests/api_surface.rs` asserts
+both properties, `tests/ui/bound_file_is_not_send.rs` asserts that `BoundFile` deliberately has
+neither, and `read_on_another_thread` in the test extension actually does it.
 
 ## Errors
 
@@ -398,15 +422,15 @@ its classes belong. The `pyo3` crate itself needs no change.
 
 `./pytests/run-tests.sh` runs all of it:
 
-- **11 compile-fail tests** (`tests/ui/`) — every capability the type does not carry is a Rust
+- **12 compile-fail tests** (`tests/ui/`) — every capability the type does not carry is a Rust
   compile error, including `io::Read` on a text file, which is the guarantee a gzip decoder wants.
 - **6 error tests** (`tests/errors.rs`) — every variant reaches Rust with the right
   `io::ErrorKind` and Python with the right exception.
-- **8 API surface tests** (`tests/api_surface.rs`) — the other half: everything that should exist
+- **9 API surface tests** (`tests/api_surface.rs`) — the other half: everything that should exist
   does, for all thirty aliases.
 - **3 comparison tests** (`tests/comparison.rs`) — the type-level claims the table above makes
   about `pyo3-filelike`, so it fails rather than going quietly out of date.
-- **178 runtime tests** (`pytests/python/`) — payload round-tripping, character-vs-byte counting,
+- **182 runtime tests** (`pytests/python/`) — payload round-tripping, character-vs-byte counting,
   the classification ladder against every standard-library file-like object, capability checks,
   misbehaving objects, and two files of side-by-side comparisons asserting both what `pyo3-file`
   and `pyo3-filelike` do today and what this crate does instead.

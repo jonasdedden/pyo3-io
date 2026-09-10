@@ -1,10 +1,14 @@
-//! [`std::io`] implementations for [`PyFile<Binary, ..>`].
+//! [`std::io`] implementations for binary files.
 //!
 //! Every byte here is a byte the Python object produced or consumed. `read(n)` asks Python for `n`
 //! bytes and `write` hands it `bytes`, so the counts mean the same thing on both sides and nothing
 //! is decoded on the way through.
+//!
+//! The work lives on [`BoundFile`], which already has a token. [`PyFile`] implements the same
+//! traits by attaching once and delegating, so a caller who has the GIL can avoid that and a
+//! caller who does not — a thread of its own, say — still works.
 
-use crate::{Binary, Error, PyFile};
+use crate::{Binary, BoundFile, Error, PyFile};
 use pyo3::intern;
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
@@ -12,14 +16,15 @@ use std::borrow::Cow;
 use std::io::{self, Read, Seek, SeekFrom, Write};
 
 impl<const WRITE: bool, const SEEK: bool, const FILENO: bool> Read
-    for PyFile<Binary, true, WRITE, SEEK, FILENO>
+    for BoundFile<'_, Binary, true, WRITE, SEEK, FILENO>
 {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         if buf.is_empty() {
             return Ok(0);
         }
-        Python::attach(|py| -> Result<usize, Error> {
-            let obj = self.as_py_object().bind(py);
+        let obj = self.as_py_object();
+        let py = obj.py();
+        (|| -> Result<usize, Error> {
             let res = obj.call_method1(intern!(py, "read"), (buf.len(),))?;
             if res.is_none() {
                 return Err(Error::would_block_read());
@@ -35,17 +40,20 @@ impl<const WRITE: bool, const SEEK: bool, const FILENO: bool> Read
             }
             buf[..bytes.len()].copy_from_slice(&bytes);
             Ok(bytes.len())
-        })
+        })()
         .map_err(Into::into)
     }
 
     /// Overridden to ask Python for the whole stream at once.
     ///
-    /// The default implementation would cross the language boundary once per buffer-sized chunk,
-    /// growing the buffer as it goes. `read(-1)` gets the same bytes in a single call.
+    /// The default implementation doubles its buffer as it goes, so the sizes it asks for sum to
+    /// twice the stream, each one a fresh Python object allocated and discarded. `read(-1)` gets
+    /// the same bytes in a single call, which is only safe to reach for because the payload kind
+    /// is known.
     fn read_to_end(&mut self, out: &mut Vec<u8>) -> io::Result<usize> {
-        Python::attach(|py| -> Result<usize, Error> {
-            let obj = self.as_py_object().bind(py);
+        let obj = self.as_py_object();
+        let py = obj.py();
+        (|| -> Result<usize, Error> {
             let before = out.len();
             // Usually one call plus an empty one; the loop is only there for objects that hand
             // back a partial result, which `read(-1)` is permitted to do.
@@ -65,15 +73,15 @@ impl<const WRITE: bool, const SEEK: bool, const FILENO: bool> Read
                 out.extend_from_slice(&chunk);
             }
             Ok(out.len() - before)
-        })
+        })()
         .map_err(Into::into)
     }
 
     /// Overridden for the same reason as [`read_to_end`](Read::read_to_end).
     ///
     /// The bytes still have to be UTF-8 checked, because a binary object promises nothing about
-    /// its encoding. If the object is a text stream on the Python side, ask for it as a
-    /// [`PyFile<Text, ..>`](crate::Text) instead and skip the check entirely.
+    /// its encoding. If the object is a text stream on the Python side, ask for it as a text file
+    /// instead and skip the check entirely.
     fn read_to_string(&mut self, out: &mut String) -> io::Result<usize> {
         let mut bytes = Vec::new();
         let read = self.read_to_end(&mut bytes)?;
@@ -89,11 +97,12 @@ impl<const WRITE: bool, const SEEK: bool, const FILENO: bool> Read
 }
 
 impl<const READ: bool, const SEEK: bool, const FILENO: bool> Write
-    for PyFile<Binary, READ, true, SEEK, FILENO>
+    for BoundFile<'_, Binary, READ, true, SEEK, FILENO>
 {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        Python::attach(|py| -> Result<usize, Error> {
-            let obj = self.as_py_object().bind(py);
+        let obj = self.as_py_object();
+        let py = obj.py();
+        (|| -> Result<usize, Error> {
             let res = obj.call_method1(intern!(py, "write"), (PyBytes::new(py, buf),))?;
             if res.is_none() {
                 return Err(Error::would_block_write());
@@ -107,7 +116,7 @@ impl<const READ: bool, const SEEK: bool, const FILENO: bool> Write
                 });
             }
             Ok(written)
-        })
+        })()
         .map_err(Into::into)
     }
 
@@ -116,20 +125,21 @@ impl<const READ: bool, const SEEK: bool, const FILENO: bool> Write
     /// An object with no `flush` has nothing to flush, so requiring one would turn away every
     /// minimal writer that implements nothing else.
     fn flush(&mut self) -> io::Result<()> {
-        Python::attach(|py| -> Result<(), Error> {
-            let obj = self.as_py_object().bind(py);
+        let obj = self.as_py_object();
+        let py = obj.py();
+        (|| -> Result<(), Error> {
             let flush = intern!(py, "flush");
             if obj.hasattr(flush)? {
                 obj.call_method0(flush)?;
             }
             Ok(())
-        })
+        })()
         .map_err(Into::into)
     }
 }
 
 impl<const READ: bool, const WRITE: bool, const FILENO: bool> Seek
-    for PyFile<Binary, READ, WRITE, true, FILENO>
+    for BoundFile<'_, Binary, READ, WRITE, true, FILENO>
 {
     fn seek(&mut self, pos: SeekFrom) -> io::Result<u64> {
         let (offset, whence) = match pos {
@@ -142,11 +152,57 @@ impl<const READ: bool, const WRITE: bool, const FILENO: bool> Seek
             SeekFrom::Current(offset) => (offset, 1),
             SeekFrom::End(offset) => (offset, 2),
         };
-        Python::attach(|py| -> Result<u64, Error> {
-            let obj = self.as_py_object().bind(py);
+        let obj = self.as_py_object();
+        let py = obj.py();
+        (|| -> Result<u64, Error> {
             let res = obj.call_method1(intern!(py, "seek"), (offset, whence))?;
             Ok(res.extract::<u64>()?)
-        })
+        })()
         .map_err(Into::into)
+    }
+}
+
+// ---------------------------------------------------------------- detached forms
+//
+// One attach for the whole operation, then the bound implementation above.
+
+impl<const WRITE: bool, const SEEK: bool, const FILENO: bool> Read
+    for PyFile<Binary, true, WRITE, SEEK, FILENO>
+{
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        Python::attach(|py| self.bind(py).read(buf))
+    }
+
+    fn read_to_end(&mut self, out: &mut Vec<u8>) -> io::Result<usize> {
+        Python::attach(|py| self.bind(py).read_to_end(out))
+    }
+
+    fn read_to_string(&mut self, out: &mut String) -> io::Result<usize> {
+        Python::attach(|py| self.bind(py).read_to_string(out))
+    }
+}
+
+impl<const READ: bool, const SEEK: bool, const FILENO: bool> Write
+    for PyFile<Binary, READ, true, SEEK, FILENO>
+{
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        Python::attach(|py| self.bind(py).write(buf))
+    }
+
+    fn write_all(&mut self, buf: &[u8]) -> io::Result<()> {
+        // One attach for the whole retry loop rather than one per short write.
+        Python::attach(|py| self.bind(py).write_all(buf))
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Python::attach(|py| self.bind(py).flush())
+    }
+}
+
+impl<const READ: bool, const WRITE: bool, const FILENO: bool> Seek
+    for PyFile<Binary, READ, WRITE, true, FILENO>
+{
+    fn seek(&mut self, pos: SeekFrom) -> io::Result<u64> {
+        Python::attach(|py| self.bind(py).seek(pos))
     }
 }

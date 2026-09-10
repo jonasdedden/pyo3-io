@@ -157,3 +157,21 @@ fn a_file_can_be_moved_to_another_thread() {
         let _ = spawn_with(file);
     }
 }
+
+/// The bound form carries the same capabilities, and only the detached one leaves the thread.
+#[test]
+fn the_bound_form_mirrors_the_detached_one() {
+    assert_read::<BoundBinaryRead<'_>>();
+    assert_write::<BoundBinaryWrite<'_>>();
+    assert_seek::<BoundBinaryReadSeek<'_>>();
+    assert_read::<BoundBinaryReadWriteSeekFileno<'_>>();
+
+    #[allow(dead_code)]
+    fn text_api(mut read: BoundTextRead<'_>, mut seek: BoundTextReadSeek<'_>) {
+        let _: std::io::Result<String> = read.read_chars(4);
+        let _: std::io::Result<u64> = seek.tell();
+    }
+
+    // `BoundFile` borrows the token, so it is deliberately neither `Send` nor `'static`; that is
+    // the whole reason `PyFile` exists alongside it. See `tests/ui/bound_file_is_not_send.rs`.
+}

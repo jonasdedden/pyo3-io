@@ -50,6 +50,11 @@ def binary_read_all(file: SupportsBinaryRead) -> bytes:
     Reads the whole stream. One `read(-1)` rather than a call per chunk.
     """
 
+def binary_read_all_bound(file: SupportsBinaryRead) -> bytes:
+    """
+    The same read with the token held throughout: no attaching happens inside the loop.
+    """
+
 def binary_read_exactly(file: SupportsBinaryRead, n: int) -> bytes:
     """
     One `read(n)` into a fixed buffer: exactly the bytes Python handed over.
@@ -131,6 +136,14 @@ def legacy_write(obj: Any, data: bytes) -> int:
     """
     The untyped equivalent of [`binary_write`]. Writing non-UTF-8 bytes to a text object panics,
     because `pyo3-file` has to decode them to hand Python a `str`.
+    """
+
+def read_on_another_thread(file: SupportsBinaryRead) -> int:
+    """
+    Moves the file onto a thread of its own, with this thread releasing the GIL entirely.
+
+    The child holds no token; each read attaches for as long as it needs and no longer. A
+    GIL-bound form could not leave this thread at all.
     """
 
 def text_fileno(file: SupportsTextFileno) -> int: ...

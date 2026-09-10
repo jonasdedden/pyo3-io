@@ -256,6 +256,22 @@ where
         Ok(())
     }
 
+    /// Borrows the file with a token, so the operations stop attaching for themselves.
+    pub fn bind<'py>(&self, py: Python<'py>) -> BoundFile<'py, M, READ, WRITE, SEEK, FILENO> {
+        BoundFile {
+            obj: self.obj.bind(py).clone(),
+            mode: PhantomData,
+        }
+    }
+
+    /// Consuming form of [`bind`](Self::bind).
+    pub fn into_bound<'py>(self, py: Python<'py>) -> BoundFile<'py, M, READ, WRITE, SEEK, FILENO> {
+        BoundFile {
+            obj: self.obj.into_bound(py),
+            mode: PhantomData,
+        }
+    }
+
     /// The wrapped object.
     pub fn as_py_object(&self) -> &Py<PyAny> {
         &self.obj
@@ -277,12 +293,99 @@ where
     /// `io.UnsupportedOperation` is entirely normal in Python — `io.BytesIO` does it — and
     /// `AsRawFd` has no way to report that other than by panicking.
     pub fn fileno(&self) -> std::io::Result<i32> {
-        Python::attach(|py| {
-            let obj = self.obj.bind(py);
-            let fd = obj.call_method0(intern!(py, "fileno"))?.extract::<i32>()?;
-            Ok(fd)
-        })
-        .map_err(|err: Error| err.into())
+        Python::attach(|py| self.bind(py).fileno())
+    }
+}
+
+/// A [`PyFile`] with the GIL already held, which is where the work actually happens.
+///
+/// This is the same split `pyo3` uses for its own types: [`PyFile`] owns a `Py<PyAny>` and is
+/// `Send + 'static`, and this borrows a `Python<'py>` token so the operations do not have to
+/// acquire one themselves. [`std::io::Read`] and friends are implemented on both — on this one
+/// directly, and on [`PyFile`] by attaching and delegating here — so a caller that already holds
+/// the GIL can say so and keep control of when it is taken:
+///
+/// ```rust,ignore
+/// #[pyfunction]
+/// fn count(py: Python<'_>, file: BinaryRead) -> PyResult<usize> {
+///     let mut file = file.into_bound(py);   // no attaching per read from here on
+///     let mut sink = Vec::new();
+///     Ok(file.read_to_end(&mut sink)?)
+/// }
+/// ```
+///
+/// Unlike [`PyFile`] this cannot leave the thread or outlive the token, which is the trade: see
+/// the crate documentation.
+pub struct BoundFile<
+    'py,
+    M,
+    const READ: bool,
+    const WRITE: bool,
+    const SEEK: bool,
+    const FILENO: bool,
+> {
+    obj: Bound<'py, PyAny>,
+    mode: PhantomData<fn() -> M>,
+}
+
+impl<M, const READ: bool, const WRITE: bool, const SEEK: bool, const FILENO: bool> std::fmt::Debug
+    for BoundFile<'_, M, READ, WRITE, SEEK, FILENO>
+where
+    M: Mode,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BoundFile")
+            .field("mode", &M::NAME)
+            .field("obj", &self.obj)
+            .finish()
+    }
+}
+
+impl<M, const READ: bool, const WRITE: bool, const SEEK: bool, const FILENO: bool> Clone
+    for BoundFile<'_, M, READ, WRITE, SEEK, FILENO>
+{
+    fn clone(&self) -> Self {
+        Self {
+            obj: self.obj.clone(),
+            mode: PhantomData,
+        }
+    }
+}
+
+impl<'py, M, const READ: bool, const WRITE: bool, const SEEK: bool, const FILENO: bool>
+    BoundFile<'py, M, READ, WRITE, SEEK, FILENO>
+where
+    M: Mode,
+{
+    /// The wrapped object.
+    pub fn as_py_object(&self) -> &Bound<'py, PyAny> {
+        &self.obj
+    }
+
+    /// Releases the token, giving back a [`PyFile`] that can cross threads again.
+    pub fn unbind(self) -> PyFile<M, READ, WRITE, SEEK, FILENO> {
+        PyFile {
+            obj: self.obj.unbind(),
+            mode: PhantomData,
+        }
+    }
+}
+
+impl<M, const READ: bool, const WRITE: bool, const SEEK: bool>
+    BoundFile<'_, M, READ, WRITE, SEEK, true>
+where
+    M: Mode,
+{
+    /// The object's file descriptor. See [`PyFile::fileno`].
+    pub fn fileno(&self) -> std::io::Result<i32> {
+        let py = self.obj.py();
+        (|| -> Result<i32, Error> {
+            Ok(self
+                .obj
+                .call_method0(intern!(py, "fileno"))?
+                .extract::<i32>()?)
+        })()
+        .map_err(Into::into)
     }
 }
 

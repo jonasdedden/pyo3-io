@@ -199,3 +199,29 @@ class TestBufferReturnTypes:
         path.write_bytes(LATIN1)
         with open(path, encoding="latin-1") as handle:
             assert ext.binary_read_all(handle.buffer) == LATIN1
+
+
+class TestBoundAndDetachedForms:
+    """The same file, with and without a token held.
+
+    `PyFile` owns a `Py<PyAny>` and attaches for each operation; `BoundFile` borrows a
+    `Python<'py>` and does not. Only the detached one can leave the thread.
+    """
+
+    def test_both_forms_read_the_same_thing(self):
+        data = os.urandom(50_000)
+        assert ext.binary_read_all(io.BytesIO(data)) == data
+        assert ext.binary_read_all_bound(io.BytesIO(data)) == data
+
+    def test_the_detached_form_works_on_a_thread_with_no_gil(self):
+        """The caller releases the GIL entirely; the reader thread acquires it per read."""
+        data = os.urandom(100_000)
+        assert ext.read_on_another_thread(io.BytesIO(data)) == len(data)
+
+    def test_and_on_a_real_file(self, tmp_binary):
+        with open(tmp_binary, "rb") as handle:
+            assert ext.read_on_another_thread(handle) == len(LATIN1)
+
+    def test_errors_survive_the_thread_boundary(self):
+        with pytest.raises(TypeError, match="expected a binary file-like object"):
+            ext.read_on_another_thread(io.StringIO("abc"))

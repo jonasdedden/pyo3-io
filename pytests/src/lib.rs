@@ -181,6 +181,33 @@ fn legacy_write(obj: Bound<'_, PyAny>, data: &[u8]) -> PyResult<usize> {
     Ok(data.len())
 }
 
+/// Moves the file onto a thread of its own, with this thread releasing the GIL entirely.
+///
+/// The child holds no token; each read attaches for as long as it needs and no longer. A
+/// GIL-bound form could not leave this thread at all.
+#[pyfunction]
+fn read_on_another_thread(py: Python<'_>, file: BinaryRead) -> PyResult<usize> {
+    let worker = std::thread::spawn(move || -> std::io::Result<usize> {
+        let mut file = file;
+        let mut sink = Vec::new();
+        file.read_to_end(&mut sink)?;
+        Ok(sink.len())
+    });
+    // Released here, so the child has to acquire it for itself.
+    py.detach(|| worker.join())
+        .map_err(|_| pyo3::exceptions::PyRuntimeError::new_err("the reader thread panicked"))?
+        .map_err(Into::into)
+}
+
+/// The same read with the token held throughout: no attaching happens inside the loop.
+#[pyfunction]
+fn binary_read_all_bound(py: Python<'_>, file: BinaryRead) -> PyResult<Py<PyBytes>> {
+    let mut file = file.into_bound(py);
+    let mut buffer = Vec::new();
+    file.read_to_end(&mut buffer)?;
+    Ok(PyBytes::new(py, &buffer).unbind())
+}
+
 /// Uses the escape hatch: no payload-kind check, capability checks kept.
 #[pyfunction]
 fn text_read_all_unchecked(mut file: Unchecked<TextRead>) -> PyResult<String> {
@@ -261,7 +288,7 @@ mod pyo3_file_typed_tests {
         binary_everything, binary_fileno, binary_read_all, binary_read_exactly, binary_read_write,
         binary_seek_roundtrip, binary_write, legacy_fileno, legacy_read_all,
         legacy_read_all_text, legacy_read_chars, legacy_read_once, legacy_write, text_fileno, text_read_all, text_read_chars,
-        filelike_fileno, filelike_read_all, filelike_read_once, filelike_text_as_bytes,
+        binary_read_all_bound, read_on_another_thread, filelike_fileno, filelike_read_all, filelike_read_once, filelike_text_as_bytes,
         filelike_text_read_all, filelike_write, text_read_all_unchecked, text_read_write, text_seek_roundtrip, text_write,
     };
 }
