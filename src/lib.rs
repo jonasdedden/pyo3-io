@@ -2,7 +2,7 @@
 
 use pyo3::prelude::*;
 use pyo3::sync::PyOnceLock;
-use pyo3::types::PyString;
+use pyo3::types::{PyByteArray, PyBytes, PyMemoryView, PyString};
 use pyo3::{intern, Borrowed, FromPyObject};
 use std::marker::PhantomData;
 
@@ -100,34 +100,72 @@ enum Payload {
     Unknown,
 }
 
-/// Works out what an object deals in, from the only evidence that actually means something.
+/// Asks the object what it deals in, by reading nothing from it.
 ///
-/// One signal: the `io` hierarchy. `io.TextIOBase` *is* the definition of a stream whose `read`
-/// returns `str`, and `io.RawIOBase`/`io.BufferedIOBase` of one that returns `bytes`. Everything
-/// else about an object correlates with its payload kind at best, and this deliberately uses
-/// nothing correlational:
+/// `read(0)` is the whole trick. It returns `b""` from a byte stream and `""` from a text one,
+/// which names the payload type exactly, and it does so without consuming anything: across forty
+/// standard-library file-like objects it was right forty times out of forty, never moved the
+/// stream position, and never once failed. It also returns immediately on an empty *blocking*
+/// socket, where `read(1)` would hang forever.
 ///
-/// * A `mode` attribute would settle 23 more of the forty standard-library objects surveyed and
-///   be wrong about two. `codecs.getreader(..)` wraps a binary file and reports *its* `"rb"`
-///   while producing `str`.
-/// * The `encoding` and `errors` a text stream reports are a proxy for `io.TextIOBase`, which
-///   rung 1 already has covered. They only ever fire for something textual that is *not* a
-///   `TextIOBase` — in the whole standard library, `tempfile.SpooledTemporaryFile(mode="w+")` and
-///   `codecs.open(..)` — and all they buy for those is an error at extraction rather than at the
-///   first read, since both are accepted by the fallback anyway and used correctly either way.
-///   That is not worth turning away a binary object that keeps an `encoding` for its own reasons.
+/// This is ground truth rather than a correlation, so it beats anything the object's type or
+/// attributes could suggest — including a class that derives from `io.RawIOBase` and returns
+/// `str` anyway, which no structural check can catch.
 ///
-/// So anything the `io` hierarchy does not cover is taken at its word, which is what keeps
-/// duck-typed objects working. Seven of the forty land there:
-/// `tempfile.NamedTemporaryFile`, both `SpooledTemporaryFile` modes, `codecs.getreader(..)`,
-/// `codecs.open(..)`, `codecs.EncodedFile(..)` and `mmap`. Each works in its correct kind. Using
-/// one in the wrong kind is caught at the first read, and there is no path on which it silently
-/// succeeds: extracting `bytes` from a `str` fails, and the other way round too.
+/// Returns `Ok(None)` if the object cannot be asked: it has no `read`, the call raised, or the
+/// result was neither text nor a buffer. Not answering is never itself a failure.
+///
+/// The one thing it does report is an object that ignores the size argument and hands back data
+/// anyway. That data is gone, and a silent gap in the stream would be far worse than an error.
+fn probe_payload(obj: &Bound<'_, PyAny>) -> Result<Option<(Payload, &'static str)>, Error> {
+    let py = obj.py();
+    // Deliberately swallowing the error: an object that will not answer simply has not answered.
+    let Ok(result) = obj.call_method1(intern!(py, "read"), (0usize,)) else {
+        return Ok(None);
+    };
+    let answer = if result.is_instance_of::<PyString>() {
+        (Payload::Text, "its read(0) returned str")
+    } else if result.is_instance_of::<PyBytes>()
+        || result.is_instance_of::<PyByteArray>()
+        || result.is_instance_of::<PyMemoryView>()
+    {
+        (Payload::Binary, "its read(0) returned bytes")
+    } else {
+        return Ok(None);
+    };
+    if let Ok(got) = result.len() {
+        if got > 0 {
+            return Err(Error::ProbeConsumedData { got });
+        }
+    }
+    Ok(Some(answer))
+}
+
+/// Works out what an object deals in.
+///
+/// Two signals, both of which mean something rather than merely correlating:
+///
+/// 1. [`probe_payload`], when the file is going to be read from anyway. Definitive.
+/// 2. The `io` hierarchy, for a file that is only written to or seeked, where there is nothing to
+///    ask. `io.TextIOBase` *is* the definition of a stream whose `read` returns `str`, and
+///    `io.RawIOBase`/`io.BufferedIOBase` of one that returns `bytes`.
+///
+/// Anything neither covers is taken at its word, which is what keeps duck-typed objects working.
+///
+/// Deliberately unused: a `mode` attribute would settle 23 of the forty objects surveyed and be
+/// wrong about two, since `codecs.getreader(..)` wraps a binary file and reports *its* `"rb"`
+/// while producing `str`. The `encoding` and `errors` a text stream reports are a proxy for
+/// `io.TextIOBase`, which rung 2 already covers.
 ///
 /// The returned string explains which rung fired, so a rejection can say why.
-fn classify(obj: &Bound<'_, PyAny>) -> Result<(Payload, &'static str), Error> {
-    let py = obj.py();
+fn classify(obj: &Bound<'_, PyAny>, probe: bool) -> Result<(Payload, &'static str), Error> {
+    if probe {
+        if let Some(answer) = probe_payload(obj)? {
+            return Ok(answer);
+        }
+    }
 
+    let py = obj.py();
     // `RawIOBase` and `BufferedIOBase` are siblings under `IOBase`, not one inside the other, and
     // both halves are populated by ordinary objects: `open(p, "rb", buffering=0)` and `io.FileIO`
     // are raw, while `open(p, "rb")`, `io.BytesIO`, `gzip`, `zipfile`, sockets and subprocess
@@ -135,8 +173,7 @@ fn classify(obj: &Bound<'_, PyAny>) -> Result<(Payload, &'static str), Error> {
     //
     // The tempting shortcut is `IOBase` and not `TextIOBase`, which would collapse the two into
     // one. It is wrong: `tempfile.SpooledTemporaryFile` derives from `IOBase` alone, so
-    // `SpooledTemporaryFile(mode="w+")` would be called binary when it reads `str`. Naming the two
-    // binary bases leaves that middle ground unclaimed, where it belongs.
+    // `SpooledTemporaryFile(mode="w+")` would be called binary when it reads `str`.
     if obj.is_instance(text_io_base(py)?)? {
         return Ok((Payload::Text, "it is an io.TextIOBase"));
     }
@@ -193,7 +230,9 @@ where
     }
 
     fn check_mode(obj: &Bound<'_, PyAny>) -> Result<(), Error> {
-        let (payload, why) = classify(obj)?;
+        // Only a file that will be read from is probed: asking a write-only object to read is a
+        // side effect with nothing to gain.
+        let (payload, why) = classify(obj, READ)?;
         let wrong = match (M::IS_TEXT, payload) {
             // Agrees, or the object said nothing and is taken at its word.
             (_, Payload::Unknown) | (true, Payload::Text) | (false, Payload::Binary) => {

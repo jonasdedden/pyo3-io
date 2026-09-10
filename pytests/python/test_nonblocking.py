@@ -32,6 +32,8 @@ class NoneThenData:
         self.calls = 0
 
     def read(self, size: int = -1, /):
+        if size == 0:
+            return b""  # a zero-length read never has to wait
         self.calls += 1
         if self.calls == 1:
             return None
@@ -43,6 +45,8 @@ class RaisesBlockingIOError:
     """The other way Python signals the same thing, used by buffered streams."""
 
     def read(self, size: int = -1, /):
+        if size == 0:
+            return b""
         raise BlockingIOError(11, "Resource temporarily unavailable")
 
 
@@ -77,6 +81,8 @@ class TestReadReturningNone:
                 self.calls = 0
 
             def read(self, size: int = -1, /):
+                if size == 0:
+                    return ""
                 self.calls += 1
                 return None if self.calls == 1 else "hello"
 

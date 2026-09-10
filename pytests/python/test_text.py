@@ -50,9 +50,10 @@ class TestReadAll:
             assert ext.text_read_all(handle) == "éèü"
 
     def test_read_to_string_is_one_call(self):
+        """Plus the payload probe's `read(0)` at extraction, so three in total."""
         reader = DuckTextReader(ASCII * 1000)
         ext.text_read_all(reader)
-        assert reader.calls == 2
+        assert reader.calls == 3
 
     def test_newlines_are_not_mangled(self):
         text = "a\nb\nc\n"

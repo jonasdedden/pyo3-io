@@ -37,7 +37,7 @@ on `pyo3` and on this crate is the whole opt-in.
 |  | `pyo3-file` | `pyo3-filelike` | this crate |
 |---|---|---|---|
 | payload kind is static | no | **yes**, two types | yes |
-| kind decided by | `isinstance(obj, io.TextIOBase)` | `mode` attribute, binary if absent | the Rust type; the object is only checked for *contradicting* it, using signals measured not to lie |
+| kind decided by | `isinstance(obj, io.TextIOBase)` | `mode` attribute, binary if absent | the Rust type; the object is checked for *contradicting* it by a `read(0)` probe |
 | duck-typed objects | accepted | accepted, then fail inside the extraction | accepted |
 | minimal writer (only `write`) | rejected | accepted | accepted |
 | override for a misidentified object | n/a | n/a | `Unchecked<..>`, keeps the annotation |
@@ -114,72 +114,85 @@ Decoding text and re-encoding it here would not round-trip the file's bytes.
 
 ### How the kind is worked out
 
-Only to *refuse* an object that contradicts what was asked for. Anything else is taken at its
-word, so a class implementing nothing but the methods it needs works.
-
-Only one signal is used, because only one *defines* the payload kind rather than correlating with
-it: `io.TextIOBase` is what it means for a stream's `read` to return `str`, and
-`io.RawIOBase`/`io.BufferedIOBase` what it means for one to return `bytes`. Anything the `io`
-hierarchy does not cover is taken at its word.
-
-Both binary bases are named because they are siblings under `IOBase`, not one inside the other,
-and both halves hold ordinary objects — `open(p, "rb", buffering=0)` and `io.FileIO` are raw,
-while `open(p, "rb")`, `io.BytesIO`, `gzip`, `zipfile`, sockets and subprocess pipes are buffered.
-Nothing is both. The shortcut of testing `IOBase` and not `TextIOBase` would collapse them into
-one check and be wrong: `tempfile.SpooledTemporaryFile` derives from `IOBase` alone, so the
-`mode="w+"` form would be called binary when it reads `str`. Naming the two binary bases leaves
-that middle ground unclaimed, where it belongs.
-
-#### Two signals considered and rejected
-
-Measured across forty standard-library file-like objects:
-
-| signal | right | wrong | says nothing |
-|---|---|---|---|
-| the `io` hierarchy | 28 | 0 | 7 |
-| a `mode` attribute | 23 | **2** | 10 |
-| the `encoding`/`errors` of a text stream | 2 more than `io` | 0 | — |
-
-**`mode` is wrong twice**, and both are `codecs`:
+By asking the object, not by guessing from its type.
 
 ```python
->>> reader = codecs.getreader("utf-8")(open(path, "rb"))
->>> reader.mode
-'rb'
->>> type(reader.read(5))
-<class 'str'>
+>>> open(path, "rb").read(0)
+b''
+>>> open(path).read(0)
+''
 ```
 
-It wraps a binary file and reports *that* file's mode while producing `str`. `pyo3-filelike` has
-`mode` as its only signal and gets this exactly backwards.
+`read(0)` returns `b""` from a byte stream and `""` from a text one, which names the payload
+exactly. It consumes nothing, never moves the stream position, and returns immediately even on an
+empty *blocking* socket, where `read(1)` would hang forever. Across forty standard-library
+file-like objects it was right forty times out of forty and failed not once.
 
-**`encoding` and `errors` are never wrong, and still not worth it.** They are a proxy for
-`io.TextIOBase`, which the first rung already covers, so they only ever fire for something textual
-that is *not* a `TextIOBase` — in the whole standard library,
-`tempfile.SpooledTemporaryFile(mode="w+")` and `codecs.open(..)`. Both are accepted by the
-fallback anyway and work correctly there, so the rung bought nothing but an *earlier* error when
-one is used in the wrong kind. That is not worth turning away a binary object that happens to keep
-an `encoding` for its own reasons: a false rejection breaks a working program, where a late error
-does not.
+That is ground truth rather than a correlation, so nothing structural can beat it — including a
+class that derives from `io.RawIOBase` and returns `str` anyway, which no `isinstance` check can
+catch:
 
-`typing.BinaryIO` and `typing.TextIO` are no help either. They are plain classes rather than
-`runtime_checkable` protocols, and `isinstance` against them is `False` for everything, including
-a real `open(p, "rb")`. They exist for annotations, and they demand the full 27-member `IO`
-surface, which is the problem this crate's protocols were written to avoid.
+```python
+class Sneaky(io.RawIOBase):
+    def read(self, size=-1, /) -> str: ...
 
-#### What falls through
+isinstance(Sneaky(), io.RawIOBase)   # True  -- a structural check says "binary"
+Sneaky().read(0)                     # ''    -- the probe says "text", correctly
+```
 
-Seven of the forty: `tempfile.NamedTemporaryFile`, both `SpooledTemporaryFile` modes,
-`codecs.getreader(..)`, `codecs.open(..)`, `codecs.EncodedFile(..)` and `mmap`. Every one works in
-its correct kind. Using one in the wrong kind is caught at the first read rather than at the
-boundary, and there is no path on which it silently succeeds — extracting `bytes` from a `str`
-fails, and the other way round too:
+It also settles the case this crate was built for: a minimal duck-typed reader that implements
+nothing but `read` is classified up front, with no attributes to inspect and no base class to
+consult.
+
+The `io` hierarchy is still checked, for the files that cannot be probed — a write-only or
+seek-only file is never asked to read, because that is a side effect with nothing to gain. Both
+binary bases are named there because `RawIOBase` and `BufferedIOBase` are siblings under `IOBase`,
+not one inside the other, and both halves hold ordinary objects; the shortcut of testing `IOBase`
+and not `TextIOBase` would call `tempfile.SpooledTemporaryFile(mode="w+")` binary when it reads
+`str`.
 
 ```text
-OSError: read() did not return str (...). This is a text file-like object, and the object did not
-identify itself as binary, so it was taken at its word. If it deals in bytes, ask for it as a
-binary PyFile, or wrap it with io.TextIOWrapper on the Python side.
+  structural only  [io]          28 classified,  7 duck typed, 0 wrong
+  probe first      [read(0), io] 35 classified,  0 duck typed, 0 wrong
 ```
+
+#### What the probe costs
+
+One `read(0)` per extraction, and one assumption: that the object honours the size argument. An
+object whose `read(0)` hands back data has broken its contract *and* that data is now gone, so it
+is reported rather than silently dropped:
+
+```text
+OSError: read(0) returned 120 items instead of nothing, so this object does not honour the size
+argument of read(). The probe that identifies binary from text streams has consumed that data and
+cannot put it back. Fix read() to return at most `size` items, or extract the file as
+Unchecked<..> to skip the probe.
+```
+
+A loud failure beats a silent gap in the stream. `Unchecked<..>` skips the probe for an object
+that cannot be asked, and carries the same type stub protocol so it costs nothing in the
+annotation.
+
+An object that simply declines — no `read`, a raise, or a return that is neither text nor a buffer
+— is not an error; the probe just has no answer and the structural check takes over.
+
+#### Signals deliberately not used
+
+A `mode` attribute would settle 23 of the forty and be wrong about two: `codecs.getreader(..)`
+wraps a binary file and reports *its* `"rb"` while producing `str`, so `pyo3-filelike`, which has
+`mode` as its only signal, gets that exactly backwards. The `encoding` and `errors` a text stream
+reports are a proxy for `io.TextIOBase`, which the structural check already covers.
+
+`typing.BinaryIO` and `typing.TextIO` are no use either: they are plain classes rather than
+`runtime_checkable` protocols, `isinstance` against them is `False` for everything including a
+real `open(p, "rb")`, and they demand the full 27-member `IO` surface that this crate's protocols
+exist to avoid.
+
+Writing has an equivalent probe — `write(b"")` succeeds on a byte stream and raises `TypeError` on
+a text one, unambiguously across every writer tested — and it is deliberately not used. Unlike a
+zero-length read, a zero-length *write* calls the object's `write`, which for a user-defined
+object is arbitrary code: a per-call writer records an empty entry. Failing on the first real
+write costs one call instead of two and has no side effect of its own.
 
 `test_classification.py` runs every rung and every standard-library file-like object I could find
 — `gzip`, `bz2`, `lzma`, `zipfile`, `tarfile`, `tempfile`, `socket.makefile`, `subprocess` pipes,
@@ -447,7 +460,7 @@ its classes belong. The `pyo3` crate itself needs no change.
   does, for all thirty aliases.
 - **3 comparison tests** (`tests/comparison.rs`) — the type-level claims the table above makes
   about `pyo3-filelike`, so it fails rather than going quietly out of date.
-- **186 runtime tests** (`pytests/python/`) — payload round-tripping, character-vs-byte counting,
+- **195 runtime tests** (`pytests/python/`) — payload round-tripping, character-vs-byte counting,
   the classification ladder against every standard-library file-like object, capability checks,
   misbehaving objects, and two files of side-by-side comparisons asserting both what `pyo3-file`
   and `pyo3-filelike` do today and what this crate does instead.

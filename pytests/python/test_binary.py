@@ -64,10 +64,13 @@ class TestReadAll:
         assert ext.binary_read_all(io.BytesIO(GZIP_MAGIC)) == GZIP_MAGIC
 
     def test_read_to_end_is_one_call(self):
-        """`read(-1)` once, then one empty call to confirm the end. Not one call per chunk."""
+        """`read(-1)` once, then one empty call to confirm the end. Not one call per chunk.
+
+        Three in total: the payload probe's `read(0)` at extraction comes first.
+        """
         reader = DuckBinaryReader(os.urandom(1 << 16))
         ext.binary_read_all(reader)
-        assert reader.calls == 2
+        assert reader.calls == 3
 
 
 class TestReadExactly:
@@ -178,8 +181,8 @@ class TestBufferReturnTypes:
                 self.done = False
 
             def read(self, size: int = -1, /):
-                if self.done:
-                    return b""
+                if size == 0 or self.done:
+                    return value[:0]
                 self.done = True
                 return value
 
