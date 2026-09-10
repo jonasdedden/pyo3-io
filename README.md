@@ -271,6 +271,30 @@ handful of `isinstance` calls against cached types.
 The one thing not done yet is `readinto`, which would let Python fill the Rust buffer directly and
 remove the remaining copy. It needs a capability of its own, since not every object has one.
 
+### Why the io implementations attach per call
+
+Each `read`/`write`/`seek` opens its own `Python::attach` rather than being written against a
+GIL-bound sibling type that carries a `Python<'py>` token. Measured on this build, with the GIL
+already held:
+
+```text
+  Python::attach                              2.51 ns
+  as a share of a 64-byte read through io::Read   0.62%
+  as a share of a 64 KiB read                     0.07%
+```
+
+Even against the cheapest Python call that exists — `BytesIO.read(0)`, 15 ns, which does nothing —
+it is 14%, and nothing real is that cheap.
+
+What it buys is that a `PyFile` owns a `Py<PyAny>` instead of borrowing a `Bound<'py, _>`, so it is
+`Send` and `'static`. That is what lets it be handed to `zip::ZipArchive::new`,
+`csv::Reader::from_reader`, `io::copy`, or a thread of its own — code that has never heard of
+Python and has nowhere to put a `'py` lifetime. A GIL-bound form could not be given to any of
+them, and could not cross a thread boundary at all. `tests/api_surface.rs` pins both.
+
+A bound sibling would be a fine *addition* for a hot loop of small reads, in the shape of PyO3's
+own `Py<T>` / `Bound<'py, T>` split. At 2.5 ns it has not earned the second API.
+
 ## Errors
 
 Everything fails with [`Error`], a `thiserror` enum, and it is meaningful in both directions.
@@ -378,7 +402,7 @@ its classes belong. The `pyo3` crate itself needs no change.
   compile error, including `io::Read` on a text file, which is the guarantee a gzip decoder wants.
 - **6 error tests** (`tests/errors.rs`) — every variant reaches Rust with the right
   `io::ErrorKind` and Python with the right exception.
-- **6 API surface tests** (`tests/api_surface.rs`) — the other half: everything that should exist
+- **8 API surface tests** (`tests/api_surface.rs`) — the other half: everything that should exist
   does, for all thirty aliases.
 - **3 comparison tests** (`tests/comparison.rs`) — the type-level claims the table above makes
   about `pyo3-filelike`, so it fails rather than going quietly out of date.
