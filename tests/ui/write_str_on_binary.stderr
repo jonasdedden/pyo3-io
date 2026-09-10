@@ -1,4 +1,4 @@
-error[E0599]: no method named `write_str` found for mutable reference `&mut PyFile<pyo3_file_typed::Binary, false, true, false, false>` in the current scope
+error[E0599]: no method named `write_str` found for mutable reference `&mut pyo3_file_typed::PyFile<pyo3_file_typed::Binary, false, true, false, false>` in the current scope
  --> tests/ui/write_str_on_binary.rs:7:18
   |
 7 |     let _ = file.write_str("text");

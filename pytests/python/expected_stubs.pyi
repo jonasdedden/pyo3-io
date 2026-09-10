@@ -45,6 +45,11 @@ class SupportsTextWrite(Protocol):
 def binary_everything(file: SupportsBinaryReadWriteSeekFileno, data: bytes) -> tuple[int, int]: ...
 def binary_fileno(file: SupportsBinaryFileno) -> int: ...
 
+def binary_fileno_via_as_fd(file: SupportsBinaryFileno) -> int:
+    """
+    Goes through `AsFd`, the way `rustix`, `nix` and `std` take a descriptor.
+    """
+
 def binary_read_all(file: SupportsBinaryRead) -> bytes:
     """
     Reads the whole stream. One `read(-1)` rather than a call per chunk.

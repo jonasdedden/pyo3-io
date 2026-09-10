@@ -1,4 +1,4 @@
-error[E0599]: the method `seek` exists for mutable reference `&mut PyFile<pyo3_file_typed::Binary, true, false, false, false>`, but its trait bounds were not satisfied
+error[E0599]: the method `seek` exists for mutable reference `&mut pyo3_file_typed::PyFile<pyo3_file_typed::Binary, true, false, false, false>`, but its trait bounds were not satisfied
  --> tests/ui/seek_without_capability.rs:8:18
   |
 8 |     let _ = file.seek(SeekFrom::Start(0));
@@ -10,5 +10,5 @@ error[E0599]: the method `seek` exists for mutable reference `&mut PyFile<pyo3_f
   | ----------------------------------------------------------------------------------------------- doesn't satisfy `_: Seek`
   |
   = note: the following trait bounds were not satisfied:
-          `PyFile<pyo3_file_typed::Binary, true, false, false, false>: Seek`
-          which is required by `&mut PyFile<pyo3_file_typed::Binary, true, false, false, false>: Seek`
+          `pyo3_file_typed::PyFile<pyo3_file_typed::Binary, true, false, false, false>: Seek`
+          which is required by `&mut pyo3_file_typed::PyFile<pyo3_file_typed::Binary, true, false, false, false>: Seek`

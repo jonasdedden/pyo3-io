@@ -2,12 +2,14 @@
 
 use pyo3::prelude::*;
 use pyo3::sync::PyOnceLock;
-use pyo3::types::{PyByteArray, PyBytes, PyMemoryView, PyString};
+use pyo3::types::PyString;
 use pyo3::{intern, Borrowed, FromPyObject};
 use std::marker::PhantomData;
 
 mod binary;
 mod error;
+#[cfg(unix)]
+mod fd;
 #[cfg(feature = "experimental-inspect")]
 mod introspection;
 mod mode;
@@ -20,17 +22,52 @@ mod sealed {
     pub trait Sealed {}
 }
 
-include!(concat!(env!("OUT_DIR"), "/aliases.rs"));
-
-/// A Python file-like object whose payload kind and capabilities are part of its Rust type.
+/// A Python file-like object dealing in `bytes`, whose capabilities are part of its type.
 ///
-/// `M` is [`Binary`] or [`Text`]. The four const parameters are the operations the object must
-/// support, in the order `READ`, `WRITE`, `SEEK`, `FILENO`. Prefer the aliases —
-/// [`BinaryRead`], [`TextReadSeek`] and so on — over spelling the parameters out.
+/// The four const parameters are the operations the object must support, in the order `READ`,
+/// `WRITE`, `SEEK`, `FILENO`. Prefer the named aliases — [`BinaryRead`], [`BinaryReadSeek`] and
+/// so on — over spelling them out.
 ///
 /// Only the capabilities that were asked for exist on the value, so a read-only file cannot be
-/// written to and a text file cannot be handed to something expecting bytes. Both are compile
-/// errors rather than runtime ones.
+/// written to, and it can never be confused with a [`PyTextFile`]. Both are compile errors rather
+/// than runtime ones.
+pub type PyBinaryFile<const READ: bool, const WRITE: bool, const SEEK: bool, const FILENO: bool> =
+    PyFile<Binary, READ, WRITE, SEEK, FILENO>;
+
+/// A Python file-like object dealing in `str`, whose capabilities are part of its type.
+///
+/// As [`PyBinaryFile`], except that Python counts a text `read(size)` in characters, so this
+/// deliberately does not implement [`std::io::Read`]: it has a character API instead, and seeks
+/// by the opaque cookies `tell()` produces rather than by byte offsets.
+pub type PyTextFile<const READ: bool, const WRITE: bool, const SEEK: bool, const FILENO: bool> =
+    PyFile<Text, READ, WRITE, SEEK, FILENO>;
+
+/// A [`PyBinaryFile`] with the GIL held. See [`BoundFile`].
+pub type BoundPyBinaryFile<
+    'py,
+    const READ: bool,
+    const WRITE: bool,
+    const SEEK: bool,
+    const FILENO: bool,
+> = BoundFile<'py, Binary, READ, WRITE, SEEK, FILENO>;
+
+/// A [`PyTextFile`] with the GIL held. See [`BoundFile`].
+pub type BoundPyTextFile<
+    'py,
+    const READ: bool,
+    const WRITE: bool,
+    const SEEK: bool,
+    const FILENO: bool,
+> = BoundFile<'py, Text, READ, WRITE, SEEK, FILENO>;
+
+include!(concat!(env!("OUT_DIR"), "/aliases.rs"));
+
+/// The shared implementation behind [`PyBinaryFile`] and [`PyTextFile`].
+///
+/// Not the public face of anything: `M` is sealed to [`Binary`] and [`Text`], and the two aliases
+/// are what the documentation and the error messages talk about. It exists as one type because
+/// construction, capability checking and the `Py`/`Bound` split are identical for both kinds.
+#[doc(hidden)]
 pub struct PyFile<M, const READ: bool, const WRITE: bool, const SEEK: bool, const FILENO: bool> {
     obj: Py<PyAny>,
     // `fn() -> M` rather than `M` so the auto traits and variance come from `Py<PyAny>` alone
@@ -100,71 +137,26 @@ enum Payload {
     Unknown,
 }
 
-/// Asks the object what it deals in, by reading nothing from it.
+/// Works out what an object deals in, without touching it.
 ///
-/// `read(0)` is the whole trick. It returns `b""` from a byte stream and `""` from a text one,
-/// which names the payload type exactly, and it does so without consuming anything: across forty
-/// standard-library file-like objects it was right forty times out of forty, never moved the
-/// stream position, and never once failed. It also returns immediately on an empty *blocking*
-/// socket, where `read(1)` would hang forever.
+/// One signal, and it is structural on purpose: `io.TextIOBase` *is* the definition of a stream
+/// whose `read` returns `str`, and `io.RawIOBase`/`io.BufferedIOBase` of one that returns `bytes`.
+/// Anything the hierarchy does not cover is taken at its word, which is what keeps duck-typed
+/// objects working; the capability checks are then the only requirement.
 ///
-/// This is ground truth rather than a correlation, so it beats anything the object's type or
-/// attributes could suggest — including a class that derives from `io.RawIOBase` and returns
-/// `str` anyway, which no structural check can catch.
+/// Nothing here calls a method on the object. A `read(0)` probe would name the payload exactly —
+/// it is right for every standard-library object and consumes nothing — but `read` on an
+/// arbitrary object is arbitrary code, with no guarantee of being free of side effects or of
+/// returning at all. A handle is not a promise that the thing behind it is ready to be touched,
+/// and extraction is the wrong moment to find out.
 ///
-/// Returns `Ok(None)` if the object cannot be asked: it has no `read`, the call raised, or the
-/// result was neither text nor a buffer. Not answering is never itself a failure.
-///
-/// The one thing it does report is an object that ignores the size argument and hands back data
-/// anyway. That data is gone, and a silent gap in the stream would be far worse than an error.
-fn probe_payload(obj: &Bound<'_, PyAny>) -> Result<Option<(Payload, &'static str)>, Error> {
-    let py = obj.py();
-    // Deliberately swallowing the error: an object that will not answer simply has not answered.
-    let Ok(result) = obj.call_method1(intern!(py, "read"), (0usize,)) else {
-        return Ok(None);
-    };
-    let answer = if result.is_instance_of::<PyString>() {
-        (Payload::Text, "its read(0) returned str")
-    } else if result.is_instance_of::<PyBytes>()
-        || result.is_instance_of::<PyByteArray>()
-        || result.is_instance_of::<PyMemoryView>()
-    {
-        (Payload::Binary, "its read(0) returned bytes")
-    } else {
-        return Ok(None);
-    };
-    if let Ok(got) = result.len() {
-        if got > 0 {
-            return Err(Error::ProbeConsumedData { got });
-        }
-    }
-    Ok(Some(answer))
-}
-
-/// Works out what an object deals in.
-///
-/// Two signals, both of which mean something rather than merely correlating:
-///
-/// 1. [`probe_payload`], when the file is going to be read from anyway. Definitive.
-/// 2. The `io` hierarchy, for a file that is only written to or seeked, where there is nothing to
-///    ask. `io.TextIOBase` *is* the definition of a stream whose `read` returns `str`, and
-///    `io.RawIOBase`/`io.BufferedIOBase` of one that returns `bytes`.
-///
-/// Anything neither covers is taken at its word, which is what keeps duck-typed objects working.
-///
-/// Deliberately unused: a `mode` attribute would settle 23 of the forty objects surveyed and be
-/// wrong about two, since `codecs.getreader(..)` wraps a binary file and reports *its* `"rb"`
-/// while producing `str`. The `encoding` and `errors` a text stream reports are a proxy for
-/// `io.TextIOBase`, which rung 2 already covers.
+/// Deliberately unused for the same reason a probe is: a `mode` attribute would settle 23 of the
+/// forty objects surveyed and be wrong about two, since `codecs.getreader(..)` wraps a binary file
+/// and reports *its* `"rb"` while producing `str`. The `encoding` and `errors` a text stream
+/// reports are a proxy for `io.TextIOBase`, which the check below already covers.
 ///
 /// The returned string explains which rung fired, so a rejection can say why.
-fn classify(obj: &Bound<'_, PyAny>, probe: bool) -> Result<(Payload, &'static str), Error> {
-    if probe {
-        if let Some(answer) = probe_payload(obj)? {
-            return Ok(answer);
-        }
-    }
-
+fn classify(obj: &Bound<'_, PyAny>) -> Result<(Payload, &'static str), Error> {
     let py = obj.py();
     // `RawIOBase` and `BufferedIOBase` are siblings under `IOBase`, not one inside the other, and
     // both halves are populated by ordinary objects: `open(p, "rb", buffering=0)` and `io.FileIO`
@@ -230,9 +222,7 @@ where
     }
 
     fn check_mode(obj: &Bound<'_, PyAny>) -> Result<(), Error> {
-        // Only a file that will be read from is probed: asking a write-only object to read is a
-        // side effect with nothing to gain.
-        let (payload, why) = classify(obj, READ)?;
+        let (payload, why) = classify(obj)?;
         let wrong = match (M::IS_TEXT, payload) {
             // Agrees, or the object said nothing and is taken at its word.
             (_, Payload::Unknown) | (true, Payload::Text) | (false, Payload::Binary) => {
@@ -334,13 +324,15 @@ where
     }
 }
 
-/// A [`PyFile`] with the GIL already held, which is where the work actually happens.
+/// The shared GIL-bound implementation behind [`BoundPyBinaryFile`] and [`BoundPyTextFile`].
 ///
-/// This is the same split `pyo3` uses for its own types: [`PyFile`] owns a `Py<PyAny>` and is
-/// `Send + 'static`, and this borrows a `Python<'py>` token so the operations do not have to
+/// See [`PyFile`] for why this is one type rather than two.
+///
+/// This is the same split `pyo3` uses for its own types: the detached form owns a `Py<PyAny>` and
+/// is `Send + 'static`, and this borrows a `Python<'py>` token so the operations do not have to
 /// acquire one themselves. [`std::io::Read`] and friends are implemented on both — on this one
-/// directly, and on [`PyFile`] by attaching and delegating here — so a caller that already holds
-/// the GIL can say so and keep control of when it is taken:
+/// directly, and on the detached form by attaching and delegating here — so a caller that already
+/// holds the GIL can say so and keep control of when it is taken:
 ///
 /// ```rust,ignore
 /// #[pyfunction]

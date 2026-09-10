@@ -1,5 +1,5 @@
-error[E0599]: no method named `fileno` found for reference `&PyFile<pyo3_file_typed::Binary, true, false, false, false>` in the current scope
+error[E0599]: no method named `fileno` found for reference `&pyo3_file_typed::PyFile<pyo3_file_typed::Binary, true, false, false, false>` in the current scope
  --> tests/ui/fileno_without_capability.rs:7:18
   |
 7 |     let _ = file.fileno();
-  |                  ^^^^^^ method not found in `&PyFile<pyo3_file_typed::Binary, true, false, false, false>`
+  |                  ^^^^^^ method not found in `&pyo3_file_typed::PyFile<pyo3_file_typed::Binary, true, false, false, false>`

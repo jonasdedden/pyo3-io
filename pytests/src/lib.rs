@@ -69,6 +69,24 @@ fn binary_fileno(file: BinaryFileno) -> PyResult<i32> {
     Ok(file.fileno()?)
 }
 
+/// Goes through `AsFd`, the way `rustix`, `nix` and `std` take a descriptor.
+#[pyfunction]
+fn binary_fileno_via_as_fd(file: BinaryFileno) -> PyResult<i32> {
+    #[cfg(unix)]
+    {
+        use std::os::fd::{AsFd, AsRawFd};
+        fn takes_fd<F: AsFd>(f: F) -> i32 {
+            f.as_fd().as_raw_fd()
+        }
+        Ok(takes_fd(file))
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = file;
+        Ok(-1)
+    }
+}
+
 // ---------------------------------------------------------------- text
 
 /// Reads the whole stream as text. One `read(-1)` and one `str` across the boundary.
@@ -288,7 +306,7 @@ mod pyo3_file_typed_tests {
         binary_everything, binary_fileno, binary_read_all, binary_read_exactly, binary_read_write,
         binary_seek_roundtrip, binary_write, legacy_fileno, legacy_read_all,
         legacy_read_all_text, legacy_read_chars, legacy_read_once, legacy_write, text_fileno, text_read_all, text_read_chars,
-        binary_read_all_bound, read_on_another_thread, filelike_fileno, filelike_read_all, filelike_read_once, filelike_text_as_bytes,
+        binary_fileno_via_as_fd, binary_read_all_bound, read_on_another_thread, filelike_fileno, filelike_read_all, filelike_read_once, filelike_text_as_bytes,
         filelike_text_read_all, filelike_write, text_read_all_unchecked, text_read_write, text_seek_roundtrip, text_write,
     };
 }

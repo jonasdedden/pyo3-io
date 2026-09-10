@@ -64,13 +64,10 @@ class TestReadAll:
         assert ext.binary_read_all(io.BytesIO(GZIP_MAGIC)) == GZIP_MAGIC
 
     def test_read_to_end_is_one_call(self):
-        """`read(-1)` once, then one empty call to confirm the end. Not one call per chunk.
-
-        Three in total: the payload probe's `read(0)` at extraction comes first.
-        """
+        """`read(-1)` once, then one empty call to confirm the end. Not one call per chunk."""
         reader = DuckBinaryReader(os.urandom(1 << 16))
         ext.binary_read_all(reader)
-        assert reader.calls == 3
+        assert reader.calls == 2
 
 
 class TestReadExactly:
@@ -228,3 +225,27 @@ class TestBoundAndDetachedForms:
     def test_errors_survive_the_thread_boundary(self):
         with pytest.raises(TypeError, match="expected a binary file-like object"):
             ext.read_on_another_thread(io.StringIO("abc"))
+
+
+class TestDescriptorTraits:
+    """`AsFd`/`AsRawFd`, which is how the ecosystem takes a descriptor.
+
+    They cannot report failure, so they panic where `fileno()` returns an error. That is the same
+    exposure `pyo3-file` and `pyo3-filelike` have, except that here the fallible `fileno()` is the
+    documented form and the traits are the compatibility layer on top.
+    """
+
+    def test_as_fd_gives_the_same_descriptor(self, tmp_binary):
+        with open(tmp_binary, "rb") as handle:
+            assert ext.binary_fileno_via_as_fd(handle) == handle.fileno()
+
+    def test_as_fd_panics_where_fileno_errors(self):
+        with pytest.raises(BaseException) as excinfo:
+            ext.binary_fileno_via_as_fd(io.BytesIO(b"abc"))
+        assert "Panic" in type(excinfo.value).__name__
+        assert "use PyFile::fileno for the fallible form" in str(excinfo.value)
+
+    def test_and_the_fallible_form_does_not(self):
+        with pytest.raises(OSError) as excinfo:
+            ext.binary_fileno(io.BytesIO(b"abc"))
+        assert "Panic" not in type(excinfo.value).__name__

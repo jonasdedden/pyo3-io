@@ -149,40 +149,30 @@ class TestStandardLibraryObjectsAreClassifiedCorrectly:
 class TestTheLadderRungs:
     """The two rungs that are used, and the one that is not."""
 
-    def test_the_probe_is_the_first_rung(self):
-        """It reads nothing and names the type, so nothing structural can beat it."""
-        with pytest.raises(TypeError, match=r"read\(0\) returned str"):
+    def test_the_io_hierarchy_is_the_only_rung(self):
+        with pytest.raises(TypeError, match=r"io\.TextIOBase"):
             ext.binary_read_all(io.StringIO(TEXT))
-        with pytest.raises(TypeError, match=r"read\(0\) returned bytes"):
+        with pytest.raises(TypeError, match=r"io\.RawIOBase or io\.BufferedIOBase"):
             ext.text_read_all(io.BytesIO(BYTES))
-
-    def test_the_io_hierarchy_covers_what_cannot_be_probed(self):
-        """A write-only file is never asked to read, so the structural check still earns its place."""
+        # and for write-only files, where there is nothing to read anyway
         with pytest.raises(TypeError, match=r"io\.RawIOBase or io\.BufferedIOBase"):
             ext.text_write(io.BytesIO(), TEXT)
-        with pytest.raises(TypeError, match=r"io\.TextIOBase"):
-            ext.binary_write(io.StringIO(), BYTES)
 
-    def test_the_probe_beats_a_class_that_lies_structurally(self):
-        """Deriving from the binary half of `io` while returning str. No structural check can
-        catch this; the probe simply asks."""
+    def test_nothing_is_called_on_the_object_during_extraction(self):
+        """Classification is structural. A handle is not a promise that the thing behind it is
+        ready to be touched, so extraction never calls `read` or `write` to find out what it is."""
 
-        class Sneaky(io.RawIOBase):
+        class Watchful:
             def __init__(self):
-                self.left = TEXT
+                self.calls = []
 
-            def readable(self):
-                return True
+            def read(self, size=-1, /) -> bytes:
+                self.calls.append(("read", size))
+                return BYTES[:size] if size is not None and size >= 0 else BYTES
 
-            def read(self, size=-1, /) -> str:
-                if size is None or size < 0:
-                    chunk, self.left = self.left, ""
-                else:
-                    chunk, self.left = self.left[:size], self.left[size:]
-                return chunk
-
-        assert isinstance(Sneaky(), io.RawIOBase)  # the structural answer would be "binary"
-        assert ext.text_read_all(Sneaky()) == TEXT  # the probe gets it right
+        watchful = Watchful()
+        ext.binary_read_exactly(watchful, 4)
+        assert watchful.calls == [("read", 4)], "extraction touched the object"
 
     def test_mode_is_never_consulted(self):
         """It would settle 23 more objects, and be wrong about two of them.
@@ -255,10 +245,10 @@ class TestFallsBackToDuckTyping:
             handle = duck_typed_factories(files)[name]()
             assert ext.text_read_chars(handle, 4) == TEXT[:4], name
 
-    def test_using_one_in_the_wrong_kind_is_caught_at_the_boundary(self, files):
-        """The probe settles it at extraction, since these are all readable."""
+    def test_using_one_in_the_wrong_kind_is_caught_at_the_first_read(self, files):
+        """Not at the boundary, which is the price of not touching the object to find out."""
         handle = duck_typed_factories(files)["SpooledTemporaryFile wb+"]()
-        with pytest.raises(TypeError, match=r"read\(0\) returned bytes"):
+        with pytest.raises(OSError, match="did not return str.*taken at its word"):
             ext.text_read_chars(handle, 4)
 
 
@@ -322,33 +312,23 @@ class TestDuckTypingIsTheFallback:
         ext.binary_write(writer, b"x")
         assert writer.flushes == 1
 
-    def test_a_bare_reader_is_still_classified_by_the_probe(self):
-        """The minimal case: a class with nothing but `read`, and it is still settled up front."""
+    def test_getting_it_wrong_says_what_to_do(self):
+        """The case structure cannot settle, so the error has to carry the explanation."""
 
-        class OnlyReadsText:
+        class SilentlyText:
             def read(self, size=-1, /) -> str:
                 return TEXT[:size] if size is not None and size >= 0 else TEXT
 
-        class OnlyReadsBytes:
+        with pytest.raises(OSError, match="did not return bytes.*taken at its word"):
+            ext.binary_read_exactly(SilentlyText(), 4)
+
+    def test_the_reverse_too(self):
+        class SilentlyBinary:
             def read(self, size=-1, /) -> bytes:
                 return BYTES[:size] if size is not None and size >= 0 else BYTES
 
-        with pytest.raises(TypeError, match=r"read\(0\) returned str"):
-            ext.binary_read_exactly(OnlyReadsText(), 4)
-        with pytest.raises(TypeError, match=r"read\(0\) returned bytes"):
-            ext.text_read_chars(OnlyReadsBytes(), 4)
-
-    def test_the_late_error_remains_for_what_cannot_be_probed(self):
-        """An object that refuses to answer `read(0)` still gets the explanatory failure."""
-
-        class WillNotBeProbed:
-            def read(self, size=-1, /):
-                if size == 0:
-                    raise ValueError("I do not do zero-length reads")
-                return TEXT[:size] if size is not None and size >= 0 else TEXT
-
-        with pytest.raises(OSError, match="did not return bytes.*taken at its word"):
-            ext.binary_read_exactly(WillNotBeProbed(), 4)
+        with pytest.raises(OSError, match="did not return str.*taken at its word"):
+            ext.text_read_chars(SilentlyBinary(), 4)
 
 
 class TestTheEscapeHatch:
@@ -372,8 +352,9 @@ class TestTheEscapeHatch:
 
         assert ext.binary_read_exactly(BinaryThatKeepsAnEncoding(), 4) == BYTES[:4]
 
-    def test_the_escape_hatch_handles_what_cannot_be_probed(self, files):
-        """A write-only file is never probed, so a structurally misleading one still needs it."""
+    def test_the_escape_hatch_handles_a_structurally_misleading_object(self, files):
+        """Deriving from the binary half of `io` while dealing in str. Nothing structural can
+        catch that, and nothing is called on the object to find out, so this is the way past."""
 
         class TextWriterInBinaryClothing(io.RawIOBase):
             def __init__(self):
@@ -452,86 +433,3 @@ class TestWhyBothBinaryBasesAreNamed:
         # The shortcut's verdict would be "binary", which is wrong. The real ladder gives no
         # verdict at all, so the object is taken at its word and works.
         assert ext.text_read_chars(handle, 4) == TEXT[:4]
-
-
-class TestThePayloadProbe:
-    """`read(0)` reads nothing and names the type. What it does and does not promise."""
-
-    def test_it_consumes_nothing(self, files):
-        """The position is where it was, so the whole stream is still there afterwards."""
-        with open(files["bin"], "rb") as handle:
-            assert ext.binary_read_all(handle) == BYTES
-        with open(files["txt"], encoding="utf-8") as handle:
-            assert ext.text_read_all(handle) == TEXT
-
-    def test_it_does_not_block_on_an_empty_blocking_socket(self):
-        """`read(1)` there would hang forever; a zero-length read never has to wait."""
-        left, right = socket.socketpair()
-        try:
-            with pytest.raises(TypeError, match=r"read\(0\) returned bytes"):
-                ext.text_read_chars(left.makefile("rb"), 4)
-        finally:
-            left.close()
-            right.close()
-
-    def test_an_object_that_refuses_to_be_probed_falls_through(self):
-        class NoZeroReads:
-            def read(self, size=-1, /) -> bytes:
-                if size == 0:
-                    raise ValueError("no")
-                return BYTES[:size] if size is not None and size >= 0 else BYTES
-
-        assert ext.binary_read_exactly(NoZeroReads(), 4) == BYTES[:4]
-
-    def test_an_object_returning_something_else_falls_through(self):
-        class ReturnsAList:
-            def read(self, size=-1, /):
-                return [] if size == 0 else list(BYTES[:size])
-
-        # Neither text nor a buffer, so the probe declines to answer and this is accepted.
-        assert ext.binary_read_exactly(ReturnsAList(), 4) == BYTES[:4]
-
-    def test_write_only_files_are_never_probed(self):
-        """Asking a writer to read is a side effect with nothing to gain."""
-
-        class WriterThatWouldNoticeARead:
-            def __init__(self):
-                self.reads = 0
-                self.written = b""
-
-            def read(self, size=-1, /) -> bytes:
-                self.reads += 1
-                return b""
-
-            def write(self, data: bytes, /) -> int:
-                self.written += data
-                return len(data)
-
-        writer = WriterThatWouldNoticeARead()
-        ext.binary_write(writer, BYTES)
-        assert writer.written == BYTES
-        assert writer.reads == 0
-
-    def test_an_object_that_ignores_the_size_is_reported_not_silently_drained(self):
-        """`read(0)` handing back data means the object broke its contract and the data is gone.
-
-        A loud failure beats a silent gap in the stream.
-        """
-
-        class IgnoresSize:
-            def read(self, size=-1, /) -> bytes:
-                return BYTES
-
-        with pytest.raises(OSError, match="does not honour the size argument"):
-            ext.binary_read_exactly(IgnoresSize(), 4)
-
-    def test_and_unchecked_skips_the_probe_entirely(self):
-        class IgnoresSize:
-            def __init__(self):
-                self.left = TEXT
-
-            def read(self, size=-1, /) -> str:
-                chunk, self.left = self.left, ""
-                return chunk
-
-        assert ext.text_read_all_unchecked(IgnoresSize()) == TEXT

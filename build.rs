@@ -219,9 +219,9 @@ fn main() {
         writeln!(
             aliases,
             "/// A {kind} object supporting {capabilities}.\n\
-             pub type {alias} = PyFile<{mode}, {read}, {write}, {seek}, {fileno}>;\n\
+             pub type {alias} = Py{mode}File<{read}, {write}, {seek}, {fileno}>;\n\
              /// A [`{alias}`] with the GIL held. See [`BoundFile`].\n\
-             pub type Bound{alias}<'py> = BoundFile<'py, {mode}, {read}, {write}, {seek}, {fileno}>;"
+             pub type Bound{alias}<'py> = BoundPy{mode}File<'py, {read}, {write}, {seek}, {fileno}>;"
         )
         .unwrap();
     }

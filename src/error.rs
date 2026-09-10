@@ -53,21 +53,6 @@ pub enum Error {
         source: PyErr,
     },
 
-    /// The payload probe read data that cannot be given back.
-    ///
-    /// `read(0)` must return nothing; an object that hands back data has ignored its argument, and
-    /// that data is now lost. Better a loud failure here than a silent gap in the stream.
-    #[error(
-        "read(0) returned {got} items instead of nothing, so this object does not honour the size \
-         argument of read(). The probe that identifies binary from text streams has consumed that \
-         data and cannot put it back. Fix read() to return at most `size` items, or extract the \
-         file as Unchecked<..> to skip the probe."
-    )]
-    ProbeConsumedData {
-        /// How much came back.
-        got: usize,
-    },
-
     /// `read` ignored the size it was given and handed back more.
     #[error("read() returned {got} bytes after being asked for at most {asked}")]
     OverlongRead {
@@ -167,8 +152,7 @@ impl From<Error> for io::Error {
             Error::WouldBlock { .. } => io::ErrorKind::WouldBlock,
             Error::WrongPayload { .. }
             | Error::OverlongRead { .. }
-            | Error::ImpossibleWriteCount { .. }
-            | Error::ProbeConsumedData { .. } => io::ErrorKind::InvalidData,
+            | Error::ImpossibleWriteCount { .. } => io::ErrorKind::InvalidData,
             Error::WroteNothing { .. } => io::ErrorKind::WriteZero,
             Error::OutOfRange { .. } => io::ErrorKind::InvalidInput,
             Error::MissingMethod { .. } | Error::WrongKind { .. } => io::ErrorKind::InvalidInput,
