@@ -2,6 +2,7 @@
 
 import io
 import os
+import os
 import tempfile
 
 import pytest
@@ -159,7 +160,7 @@ class TestMisbehavingObjects:
             ext.binary_read_exactly(Overreader(), 4)
 
     def test_none_is_would_block(self):
-        with pytest.raises(OSError, match="no data is available yet"):
+        with pytest.raises(BlockingIOError, match="nothing could be read right now"):
             ext.binary_read_exactly(NonBlocking(), 4)
 
     def test_write_claiming_too_much(self):

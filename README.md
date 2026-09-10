@@ -232,15 +232,101 @@ text: read a whole stream
   1024 KiB                432.2 us         n/a    473.0 us              1.09x  pyo3-file: 4-byte guard
 ```
 
-Binary `read_to_end` is one `read(-1)` rather than a call per buffer-sized chunk, which is only
-safe to do because the implementation knows it is talking to a byte stream. Text reads hand a
-`str` straight across instead of encoding it to UTF-8 and validating it back again — and against
-`pyo3-filelike` there is a second copy saved, since its `PyTextFile` stages everything through an
-internal `Vec<u8>` and `drain`s the front of it after every read. Neither is a micro-optimisation
-bolted on; both fall out of not having to guess.
+### Where the binary margin comes from
 
-There is no measurable cost to the payload-kind check: it runs once per extraction and is two
-`isinstance` calls against cached types.
+Not from the call count, which is the obvious guess and the wrong one. Counting the `read` calls
+an object actually receives:
+
+```text
+             this crate   pyo3-file / pyo3-filelike
+  4 KiB          2                  9
+  64 KiB         2                 13
+  1024 KiB       2                 17
+  8192 KiB       2                 20
+```
+
+Twenty crossings instead of two is worth perhaps 20 µs, and the 8 MiB gap is 786 µs. The real
+cost is what those calls *ask for*. Both neighbours use `std`'s default `read_to_end`, which
+doubles its buffer each time:
+
+```text
+  32, 32, 64, 128, 256, 512, 1024, 2048, ... 524288, 1048576
+```
+
+Summed, that is **exactly twice the size of the stream**, at every size measured. Every one of
+those is a fresh Python `bytes` object allocated, filled and thrown away, and the `Vec` regrows
+underneath for roughly another 2× of copying. This crate asks `read(-1)` once, so Python allocates
+the stream once and it is copied once into a `Vec` that reaches its final size in a single
+`reserve`.
+
+So the margin is allocator and memcpy traffic, not FFI overhead — which is why it holds steady at
+around 2.5x from 4 KiB to 8 MiB instead of shrinking as the calls amortise.
+
+`read(-1)` is only safe to reach for because the implementation knows it is talking to a byte
+stream. Text reads hand a `str` straight across instead of encoding it to UTF-8 and validating it
+back again — and against `pyo3-filelike` there is a further copy saved, since its `PyTextFile`
+stages everything through an internal `Vec<u8>` and `drain`s the front of it after every read.
+Neither is a micro-optimisation bolted on; both fall out of not having to guess.
+
+There is no measurable cost to the payload-kind check: it runs once per extraction and is a
+handful of `isinstance` calls against cached types.
+
+The one thing not done yet is `readinto`, which would let Python fill the Rust buffer directly and
+remove the remaining copy. It needs a capability of its own, since not every object has one.
+
+## Errors
+
+Everything fails with [`Error`], a `thiserror` enum, and it is meaningful in both directions.
+Towards Rust it carries a real [`io::ErrorKind`](std::io::ErrorKind) rather than flattening to
+`Other`:
+
+| variant | kind |
+|---|---|
+| `WouldBlock` | `WouldBlock` |
+| `WrongPayload`, `OverlongRead`, `ImpossibleWriteCount` | `InvalidData` |
+| `WroteNothing` | `WriteZero` |
+| `OutOfRange`, `MissingMethod`, `WrongKind` | `InvalidInput` |
+| `Python` | whatever `pyo3` maps the exception to |
+
+Towards Python, `MissingMethod` and `WrongKind` become `TypeError`, `WouldBlock` becomes
+`BlockingIOError`, and the rest go through `io::Error`.
+
+### `None` is not a failure
+
+CPython's io protocol uses `None` for "nothing could be done right now", which is a different
+thing from `b""` for end of stream. It is what an unbuffered non-blocking stream returns before
+data arrives, and the *same object* returns real data on a later call:
+
+```python
+>>> r, w = os.pipe(); os.set_blocking(r, False)
+>>> f = open(r, "rb", buffering=0)
+>>> f.read(10)          # None: nothing yet
+>>> os.write(w, b"hello")
+>>> f.read(10)
+b'hello'
+```
+
+So `None` maps to `io::ErrorKind::WouldBlock` and reaches Python as `BlockingIOError`. That is the
+same exception a *buffered* stream raises by itself for the same condition, and `pyo3` already
+maps that exception back to `WouldBlock`, so both of Python's signalling styles land in one place
+and a caller only has to handle one. `write` returning `None` is the same story: the raw stream
+could not take a single byte, and a retry may.
+
+Neither neighbour does this. `pyo3-file` has no `None` case on read, so the extraction failure
+surfaces as a non-retryable error, and on write it raises a plain `io::Error::other`.
+`pyo3-filelike` discards `write`'s return value entirely, so a `None` write — and, unrelated to
+non-blocking, *any* partial write — is reported as a complete success:
+
+```python
+>>> writer = Partial()                       # accepts 3 bytes per call
+>>> filelike_write(writer, b"0123456789")
+10
+>>> writer.got
+b'012'                                       # seven bytes silently dropped
+```
+
+`test_nonblocking.py` covers all of it, including a real non-blocking pipe, and asserts what each
+neighbour does today so the comparison fails rather than going stale.
 
 ## Type stubs
 
@@ -293,11 +379,13 @@ its classes belong. The `pyo3` crate itself needs no change.
 
 - **11 compile-fail tests** (`tests/ui/`) — every capability the type does not carry is a Rust
   compile error, including `io::Read` on a text file, which is the guarantee a gzip decoder wants.
+- **6 error tests** (`tests/errors.rs`) — every variant reaches Rust with the right
+  `io::ErrorKind` and Python with the right exception.
 - **6 API surface tests** (`tests/api_surface.rs`) — the other half: everything that should exist
   does, for all thirty aliases.
 - **3 comparison tests** (`tests/comparison.rs`) — the type-level claims the table above makes
   about `pyo3-filelike`, so it fails rather than going quietly out of date.
-- **160 runtime tests** (`pytests/python/`) — payload round-tripping, character-vs-byte counting,
+- **174 runtime tests** (`pytests/python/`) — payload round-tripping, character-vs-byte counting,
   the classification ladder against every standard-library file-like object, capability checks,
   misbehaving objects, and two files of side-by-side comparisons asserting both what `pyo3-file`
   and `pyo3-filelike` do today and what this crate does instead.

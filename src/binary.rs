@@ -4,43 +4,12 @@
 //! bytes and `write` hands it `bytes`, so the counts mean the same thing on both sides and nothing
 //! is decoded on the way through.
 
-use crate::{Binary, PyFile};
+use crate::{Binary, Error, PyFile};
 use pyo3::intern;
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
-use pyo3::PyErr;
 use std::borrow::Cow;
 use std::io::{self, Read, Seek, SeekFrom, Write};
-
-/// A Python stream returning `None` means "no data available right now", not end of file.
-fn would_block() -> io::Error {
-    io::Error::new(
-        io::ErrorKind::WouldBlock,
-        "the object returned None, meaning no data is available yet",
-    )
-}
-
-/// A duck-typed object that turned out to deal in the other payload after all.
-///
-/// The payload-kind check lets an object through when it says nothing about itself, which is what
-/// keeps duck typing working, so the mistake can only surface here. Say what to do about it.
-fn wrong_payload(err: PyErr) -> io::Error {
-    io::Error::new(
-        io::ErrorKind::InvalidData,
-        format!(
-            "read() did not return bytes ({err}). This is a binary file-like object, and the \
-             object did not identify itself as text, so it was taken at its word. If it deals in \
-             str, ask for it as a text PyFile, or wrap it with io.TextIOWrapper on the Python side."
-        ),
-    )
-}
-
-fn too_much(got: usize, asked: usize) -> io::Error {
-    io::Error::new(
-        io::ErrorKind::InvalidData,
-        format!("read() returned {got} bytes after being asked for at most {asked}"),
-    )
-}
 
 impl<const WRITE: bool, const SEEK: bool, const FILENO: bool> Read
     for PyFile<Binary, true, WRITE, SEEK, FILENO>
@@ -49,19 +18,25 @@ impl<const WRITE: bool, const SEEK: bool, const FILENO: bool> Read
         if buf.is_empty() {
             return Ok(0);
         }
-        Python::attach(|py| {
+        Python::attach(|py| -> Result<usize, Error> {
             let obj = self.as_py_object().bind(py);
             let res = obj.call_method1(intern!(py, "read"), (buf.len(),))?;
             if res.is_none() {
-                return Err(would_block());
+                return Err(Error::would_block_read());
             }
-            let bytes = res.extract::<Cow<'_, [u8]>>().map_err(wrong_payload)?;
+            let bytes = res
+                .extract::<Cow<'_, [u8]>>()
+                .map_err(Error::wrong_payload::<Binary>)?;
             if bytes.len() > buf.len() {
-                return Err(too_much(bytes.len(), buf.len()));
+                return Err(Error::OverlongRead {
+                    got: bytes.len(),
+                    asked: buf.len(),
+                });
             }
             buf[..bytes.len()].copy_from_slice(&bytes);
             Ok(bytes.len())
         })
+        .map_err(Into::into)
     }
 
     /// Overridden to ask Python for the whole stream at once.
@@ -69,7 +44,7 @@ impl<const WRITE: bool, const SEEK: bool, const FILENO: bool> Read
     /// The default implementation would cross the language boundary once per buffer-sized chunk,
     /// growing the buffer as it goes. `read(-1)` gets the same bytes in a single call.
     fn read_to_end(&mut self, out: &mut Vec<u8>) -> io::Result<usize> {
-        Python::attach(|py| {
+        Python::attach(|py| -> Result<usize, Error> {
             let obj = self.as_py_object().bind(py);
             let before = out.len();
             // Usually one call plus an empty one; the loop is only there for objects that hand
@@ -77,11 +52,13 @@ impl<const WRITE: bool, const SEEK: bool, const FILENO: bool> Read
             loop {
                 let res = obj.call_method1(intern!(py, "read"), (-1i64,))?;
                 if res.is_none() {
-                    return Err(would_block());
+                    return Err(Error::would_block_read());
                 }
                 // Borrowed from the Python object and copied straight into `out`: extracting an
                 // owned `Vec` first would copy the whole stream an extra time.
-                let chunk = res.extract::<Cow<'_, [u8]>>().map_err(wrong_payload)?;
+                let chunk = res
+                    .extract::<Cow<'_, [u8]>>()
+                    .map_err(Error::wrong_payload::<Binary>)?;
                 if chunk.is_empty() {
                     break;
                 }
@@ -89,6 +66,7 @@ impl<const WRITE: bool, const SEEK: bool, const FILENO: bool> Read
             }
             Ok(out.len() - before)
         })
+        .map_err(Into::into)
     }
 
     /// Overridden for the same reason as [`read_to_end`](Read::read_to_end).
@@ -114,21 +92,23 @@ impl<const READ: bool, const SEEK: bool, const FILENO: bool> Write
     for PyFile<Binary, READ, true, SEEK, FILENO>
 {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        Python::attach(|py| {
+        Python::attach(|py| -> Result<usize, Error> {
             let obj = self.as_py_object().bind(py);
             let res = obj.call_method1(intern!(py, "write"), (PyBytes::new(py, buf),))?;
             if res.is_none() {
-                return Err(would_block());
+                return Err(Error::would_block_write());
             }
             let written = res.extract::<usize>()?;
             if written > buf.len() {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    format!("write() reported {written} bytes written of {}", buf.len()),
-                ));
+                return Err(Error::ImpossibleWriteCount {
+                    reported: written,
+                    available: buf.len(),
+                    unit: "bytes",
+                });
             }
             Ok(written)
         })
+        .map_err(Into::into)
     }
 
     /// Flushes the object, or does nothing if it has no `flush`.
@@ -136,7 +116,7 @@ impl<const READ: bool, const SEEK: bool, const FILENO: bool> Write
     /// An object with no `flush` has nothing to flush, so requiring one would turn away every
     /// minimal writer that implements nothing else.
     fn flush(&mut self) -> io::Result<()> {
-        Python::attach(|py| {
+        Python::attach(|py| -> Result<(), Error> {
             let obj = self.as_py_object().bind(py);
             let flush = intern!(py, "flush");
             if obj.hasattr(flush)? {
@@ -144,6 +124,7 @@ impl<const READ: bool, const SEEK: bool, const FILENO: bool> Write
             }
             Ok(())
         })
+        .map_err(Into::into)
     }
 }
 
@@ -153,18 +134,19 @@ impl<const READ: bool, const WRITE: bool, const FILENO: bool> Seek
     fn seek(&mut self, pos: SeekFrom) -> io::Result<u64> {
         let (offset, whence) = match pos {
             SeekFrom::Start(offset) => (
-                i64::try_from(offset).map_err(|_| {
-                    io::Error::new(io::ErrorKind::InvalidInput, "seek offset out of range")
+                i64::try_from(offset).map_err(|_| Error::OutOfRange {
+                    what: "seek offset",
                 })?,
                 0,
             ),
             SeekFrom::Current(offset) => (offset, 1),
             SeekFrom::End(offset) => (offset, 2),
         };
-        Python::attach(|py| {
+        Python::attach(|py| -> Result<u64, Error> {
             let obj = self.as_py_object().bind(py);
             let res = obj.call_method1(intern!(py, "seek"), (offset, whence))?;
             Ok(res.extract::<u64>()?)
         })
+        .map_err(Into::into)
     }
 }

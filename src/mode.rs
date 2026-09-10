@@ -29,18 +29,30 @@ pub struct Text;
 pub trait Mode: Sealed {
     /// Whether this is [`Text`].
     const IS_TEXT: bool;
-    /// How the kind is spelled in error messages.
+    /// How the kind is spelled in error messages, e.g. `binary`.
     const NAME: &'static str;
+    /// The other kind's spelling, e.g. `text`.
+    const OTHER_NAME: &'static str;
+    /// The Python type a read produces, e.g. `bytes`.
+    const PAYLOAD: &'static str;
+    /// The other kind's payload, e.g. `str`.
+    const OTHER_PAYLOAD: &'static str;
 }
 
 impl Sealed for Binary {}
 impl Mode for Binary {
     const IS_TEXT: bool = false;
     const NAME: &'static str = "binary";
+    const OTHER_NAME: &'static str = "text";
+    const PAYLOAD: &'static str = "bytes";
+    const OTHER_PAYLOAD: &'static str = "str";
 }
 
 impl Sealed for Text {}
 impl Mode for Text {
     const IS_TEXT: bool = true;
     const NAME: &'static str = "text";
+    const OTHER_NAME: &'static str = "binary";
+    const PAYLOAD: &'static str = "str";
+    const OTHER_PAYLOAD: &'static str = "bytes";
 }

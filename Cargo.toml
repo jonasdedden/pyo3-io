@@ -17,6 +17,7 @@ experimental-inspect = ["pyo3/experimental-inspect"]
 # branch `introspection-attach-to-root`. The `pyo3` crate itself needs no change; it is the stub
 # *generator* in that checkout that does.
 pyo3 = { path = "../pyo3" }
+thiserror = "2"
 
 [dev-dependencies]
 trybuild = "1.0"

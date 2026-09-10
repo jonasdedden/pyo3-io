@@ -1,6 +1,5 @@
 #![doc = include_str!("../README.md")]
 
-use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
 use pyo3::sync::PyOnceLock;
 use pyo3::types::PyString;
@@ -8,11 +7,13 @@ use pyo3::{intern, Borrowed, FromPyObject};
 use std::marker::PhantomData;
 
 mod binary;
+mod error;
 #[cfg(feature = "experimental-inspect")]
 mod introspection;
 mod mode;
 mod text;
 
+pub use error::Error;
 pub use mode::{Binary, Mode, Text};
 
 mod sealed {
@@ -111,7 +112,7 @@ enum Payload {
 /// which is what keeps duck-typed objects working.
 ///
 /// The returned string explains which rung fired, so a rejection can say why.
-fn classify(obj: &Bound<'_, PyAny>) -> PyResult<(Payload, &'static str)> {
+fn classify(obj: &Bound<'_, PyAny>) -> Result<(Payload, &'static str), Error> {
     let py = obj.py();
 
     // 1. The `io` hierarchy. Definitive, and covers nearly every object from the standard library.
@@ -179,7 +180,7 @@ where
     /// file. The payload kind check only *rejects*: an object that is definitely of the wrong kind
     /// is refused here rather than failing confusingly on the first read, but an object that is
     /// neither an `io.TextIOBase` nor an `io.RawIOBase`/`io.BufferedIOBase` is taken at its word.
-    pub fn py_new(obj: Bound<'_, PyAny>) -> PyResult<Self> {
+    pub fn py_new(obj: Bound<'_, PyAny>) -> Result<Self, Error> {
         Self::check_mode(&obj)?;
         Self::check_capabilities(&obj)?;
         Ok(Self {
@@ -189,7 +190,7 @@ where
     }
 
     /// Same as [`py_new`](Self::py_new) but takes and re-attaches to acquire the GIL itself.
-    pub fn new(obj: Py<PyAny>) -> PyResult<Self> {
+    pub fn new(obj: Py<PyAny>) -> Result<Self, Error> {
         Python::attach(|py| Self::py_new(obj.into_bound(py)))
     }
 
@@ -202,7 +203,7 @@ where
     /// be classified by its `mode` and refused; this is how to say you know better.
     ///
     /// Nothing here is memory-unsafe. Getting it wrong means the first read or write fails.
-    pub fn py_new_unchecked(obj: Bound<'_, PyAny>) -> PyResult<Self> {
+    pub fn py_new_unchecked(obj: Bound<'_, PyAny>) -> Result<Self, Error> {
         Self::check_capabilities(&obj)?;
         Ok(Self {
             obj: obj.unbind(),
@@ -210,56 +211,64 @@ where
         })
     }
 
-    fn check_mode(obj: &Bound<'_, PyAny>) -> PyResult<()> {
+    fn check_mode(obj: &Bound<'_, PyAny>) -> Result<(), Error> {
         let (payload, why) = classify(obj)?;
-        let name = obj.get_type().name()?;
-        match (M::IS_TEXT, payload) {
+        let wrong = match (M::IS_TEXT, payload) {
             // Agrees, or the object said nothing and is taken at its word.
-            (_, Payload::Unknown) | (true, Payload::Text) | (false, Payload::Binary) => Ok(()),
-            (false, Payload::Text) => Err(PyTypeError::new_err(format!(
-                "expected a binary file-like object, got the text object {name} ({why}). \
-                 Pass obj.buffer to get at the bytes underneath, or open the file in binary mode. \
-                 Decoding text and re-encoding it here would not round-trip the file's bytes."
-            ))),
-            (true, Payload::Binary) => Err(PyTypeError::new_err(format!(
-                "expected a text file-like object, got the binary object {name} ({why}). \
-                 Wrap it with io.TextIOWrapper(obj, encoding=...), which is where the choice \
-                 of encoding belongs, or open the file in text mode."
-            ))),
-        }
+            (_, Payload::Unknown) | (true, Payload::Text) | (false, Payload::Binary) => {
+                return Ok(())
+            }
+            (false, Payload::Text) => Error::WrongKind {
+                wanted: "binary",
+                got: "text",
+                type_name: obj.get_type().name()?.to_string(),
+                why,
+                hint: "Pass obj.buffer to get at the bytes underneath, or open the file in binary \
+                       mode. Decoding text and re-encoding it here would not round-trip the \
+                       file's bytes.",
+            },
+            (true, Payload::Binary) => Error::WrongKind {
+                wanted: "text",
+                got: "binary",
+                type_name: obj.get_type().name()?.to_string(),
+                why,
+                hint: "Wrap it with io.TextIOWrapper(obj, encoding=...), which is where the \
+                       choice of encoding belongs, or open the file in text mode.",
+            },
+        };
+        Err(wrong)
     }
 
-    fn check_capabilities(obj: &Bound<'_, PyAny>) -> PyResult<()> {
+    fn check_capabilities(obj: &Bound<'_, PyAny>) -> Result<(), Error> {
         let py = obj.py();
-        let require = |name: &Bound<'_, PyString>| -> PyResult<()> {
+        let require = |name: &Bound<'_, PyString>, method: &'static str| -> Result<(), Error> {
             if obj.hasattr(name)? {
                 Ok(())
             } else {
-                Err(PyTypeError::new_err(format!(
-                    "object of type {} has no .{}() method",
-                    obj.get_type().name()?,
-                    name
-                )))
+                Err(Error::MissingMethod {
+                    type_name: obj.get_type().name()?.to_string(),
+                    method,
+                })
             }
         };
         if READ {
-            require(intern!(py, "read"))?;
+            require(intern!(py, "read"), "read")?;
         }
         if WRITE {
-            require(intern!(py, "write"))?;
+            require(intern!(py, "write"), "write")?;
             // `flush` is deliberately not required. An object that has none has nothing to flush,
             // so flushing it is a no-op rather than an error, and demanding it would turn away
             // every minimal writer that implements nothing but `write`.
         }
         if SEEK {
-            require(intern!(py, "seek"))?;
+            require(intern!(py, "seek"), "seek")?;
             if M::IS_TEXT {
                 // Text streams only accept opaque cookies, which come from tell()
-                require(intern!(py, "tell"))?;
+                require(intern!(py, "tell"), "tell")?;
             }
         }
         if FILENO {
-            require(intern!(py, "fileno"))?;
+            require(intern!(py, "fileno"), "fileno")?;
         }
         Ok(())
     }
@@ -272,14 +281,6 @@ where
     /// Unwraps to the underlying object, discarding the static guarantees.
     pub fn into_py_object(self) -> Py<PyAny> {
         self.obj
-    }
-
-    fn call<'py, T>(
-        &self,
-        py: Python<'py>,
-        f: impl FnOnce(&Bound<'py, PyAny>) -> PyResult<T>,
-    ) -> std::io::Result<T> {
-        f(self.obj.bind(py)).map_err(Into::into)
     }
 }
 
@@ -294,10 +295,11 @@ where
     /// `AsRawFd` has no way to report that other than by panicking.
     pub fn fileno(&self) -> std::io::Result<i32> {
         Python::attach(|py| {
-            self.call(py, |obj| {
-                obj.call_method0(intern!(py, "fileno"))?.extract::<i32>()
-            })
+            let obj = self.obj.bind(py);
+            let fd = obj.call_method0(intern!(py, "fileno"))?.extract::<i32>()?;
+            Ok(fd)
         })
+        .map_err(|err: Error| err.into())
     }
 }
 
@@ -352,7 +354,7 @@ where
         introspection::protocol_hint(M::IS_TEXT, READ, WRITE, SEEK, FILENO);
 
     fn extract(obj: Borrowed<'_, 'py, PyAny>) -> Result<Self, Self::Error> {
-        PyFile::py_new_unchecked(obj.as_any().clone()).map(Self)
+        Ok(Self(PyFile::py_new_unchecked(obj.as_any().clone())?))
     }
 }
 
@@ -368,6 +370,6 @@ where
         introspection::protocol_hint(M::IS_TEXT, READ, WRITE, SEEK, FILENO);
 
     fn extract(obj: Borrowed<'_, 'py, PyAny>) -> Result<Self, Self::Error> {
-        Self::py_new(obj.as_any().clone())
+        Ok(Self::py_new(obj.as_any().clone())?)
     }
 }
