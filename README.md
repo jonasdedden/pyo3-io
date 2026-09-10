@@ -128,6 +128,16 @@ Only signals that do not lie are used. Measured across forty standard-library fi
 So the ladder is: `io.TextIOBase` means text and `io.RawIOBase`/`io.BufferedIOBase` mean bytes;
 failing that, a `str` `encoding` means text; failing that, nothing is assumed.
 
+Both binary bases are named because they are siblings under `IOBase`, not one inside the other,
+and both halves hold ordinary objects — `open(p, "rb", buffering=0)` and `io.FileIO` are raw,
+while `open(p, "rb")`, `io.BytesIO`, `gzip`, `zipfile`, sockets and subprocess pipes are buffered.
+Nothing is both.
+
+The shortcut of testing `IOBase` and not `TextIOBase` would collapse them into one check and be
+wrong: `tempfile.SpooledTemporaryFile` derives from `IOBase` alone, so the `mode="w+"` form would
+be called binary when it reads `str`. Naming the two binary bases leaves that middle ground
+unclaimed, which is what lets the `encoding` rung get it right.
+
 `mode` would settle twenty-three more objects and be wrong about two, and it is not used. Both
 wrong ones are `codecs`:
 
@@ -430,7 +440,7 @@ its classes belong. The `pyo3` crate itself needs no change.
   does, for all thirty aliases.
 - **3 comparison tests** (`tests/comparison.rs`) — the type-level claims the table above makes
   about `pyo3-filelike`, so it fails rather than going quietly out of date.
-- **182 runtime tests** (`pytests/python/`) — payload round-tripping, character-vs-byte counting,
+- **187 runtime tests** (`pytests/python/`) — payload round-tripping, character-vs-byte counting,
   the classification ladder against every standard-library file-like object, capability checks,
   misbehaving objects, and two files of side-by-side comparisons asserting both what `pyo3-file`
   and `pyo3-filelike` do today and what this crate does instead.

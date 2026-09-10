@@ -370,3 +370,53 @@ class TestTheEscapeHatch:
         an object claims about itself can influence what the type checker demands."""
         assert "mode" not in stub_source
         assert "encoding" not in stub_source
+
+
+class TestWhyBothBinaryBasesAreNamed:
+    """`RawIOBase` and `BufferedIOBase` are siblings, and the obvious shortcut is wrong.
+
+    Neither is inside the other, nothing is both, and both halves hold ordinary objects. Checking
+    `IOBase` and not `TextIOBase` instead would collapse them into one test -- and swallow the
+    middle ground where `tempfile.SpooledTemporaryFile` lives.
+    """
+
+    def test_the_two_bases_are_siblings(self):
+        assert io.RawIOBase not in io.BufferedIOBase.__mro__
+        assert io.BufferedIOBase not in io.RawIOBase.__mro__
+
+    def test_raw_only_objects_need_the_raw_check(self, tmp_path):
+        """Unbuffered files are `RawIOBase` and nothing else."""
+        path = tmp_path / "raw.bin"
+        path.write_bytes(BYTES)
+        with open(path, "rb", buffering=0) as handle:
+            assert isinstance(handle, io.RawIOBase)
+            assert not isinstance(handle, io.BufferedIOBase)
+            assert ext.binary_read_exactly(handle, 4) == BYTES[:4]
+
+    def test_buffered_only_objects_need_the_buffered_check(self):
+        """Nearly everything else is `BufferedIOBase` and nothing else."""
+        handle = io.BytesIO(BYTES)
+        assert isinstance(handle, io.BufferedIOBase)
+        assert not isinstance(handle, io.RawIOBase)
+        assert ext.binary_read_exactly(handle, 4) == BYTES[:4]
+
+    def test_nothing_is_both(self, files):
+        for factory in list(binary_factories(files).values()):
+            handle = factory()
+            assert not (
+                isinstance(handle, io.RawIOBase) and isinstance(handle, io.BufferedIOBase)
+            ), handle
+
+    def test_the_iobase_shortcut_would_break_this(self):
+        """`SpooledTemporaryFile` is `IOBase` alone, and its text form reads `str`.
+
+        `isinstance(obj, IOBase) and not isinstance(obj, TextIOBase)` would call this binary. The
+        `io` rung runs first, so it would win over the `encoding` rung that gets it right today.
+        """
+        handle = _spooled("w+", TEXT)
+        assert isinstance(handle, io.IOBase)
+        assert not isinstance(handle, (io.RawIOBase, io.BufferedIOBase, io.TextIOBase))
+        # the shortcut's verdict would be "binary"; the real answer is text, and it works
+        assert ext.text_read_chars(handle, 4) == TEXT[:4]
+        with pytest.raises(TypeError, match="str `encoding` attribute"):
+            ext.binary_read_exactly(_spooled("w+", TEXT), 4)
