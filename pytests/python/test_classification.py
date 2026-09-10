@@ -1,9 +1,12 @@
 """How the payload kind of an object is worked out.
 
-The ladder prefers explicit evidence and falls back to taking the object at its word, so that a
-class implementing nothing but the methods it needs still works. Each rung is here, and so is
-every standard-library file-like object I could find, because the cheap signals are the
-unreliable ones and the ordering is the whole design.
+Only signals that do not lie are used, and everything else falls back to taking the object at its
+word. Measured across the standard-library objects below: the `io` hierarchy is right 28 times and
+wrong none, a `str` `encoding` attribute is right 11 times and wrong none, and a `mode` attribute
+would settle 23 more but is wrong twice, so it is not consulted at all.
+
+That leaves five objects unclassified, listed in `TestFallsBackToDuckTyping`. Each works in its
+correct kind; using one in the wrong kind is caught at the first read instead of at the boundary.
 """
 
 import bz2
@@ -62,7 +65,6 @@ def binary_factories(files):
         "zipfile.ZipExtFile": lambda: zipfile.ZipFile(files["zip"]).open("a.bin"),
         "tarfile ExFileObject": lambda: tarfile.open(files["tar"]).extractfile("a.bin"),
         "tempfile.TemporaryFile": lambda: tempfile.TemporaryFile(),
-        "SpooledTemporaryFile wb+": lambda: _spooled("wb+", BYTES),
         "socket.makefile rb": lambda: socket.socketpair()[0].makefile("rb"),
         "os.fdopen rb": lambda: os.fdopen(os.open(files["bin"], os.O_RDONLY), "rb"),
         "subprocess pipe": lambda: subprocess.run(
@@ -82,8 +84,17 @@ def text_factories(files):
         "tempfile.TemporaryFile w+": lambda: tempfile.TemporaryFile("w+"),
         "SpooledTemporaryFile w+": lambda: _spooled("w+", TEXT),
         "socket.makefile r": lambda: socket.socketpair()[0].makefile("r"),
-        "codecs.getreader": lambda: codecs.getreader("utf-8")(open(files["bin"], "rb")),
         "sys.stdout": lambda: sys.stdout,
+    }
+
+
+def duck_typed_factories(files):
+    """The five the classifier deliberately says nothing about."""
+    return {
+        "NamedTemporaryFile": lambda: tempfile.NamedTemporaryFile(),
+        "SpooledTemporaryFile wb+": lambda: _spooled("wb+", BYTES),
+        "codecs.getreader": lambda: codecs.getreader("utf-8")(open(files["bin"], "rb")),
+        "codecs.EncodedFile": lambda: codecs.EncodedFile(open(files["bin"], "rb"), "utf-8"),
     }
 
 
@@ -131,26 +142,13 @@ class TestStandardLibraryObjectsAreClassifiedCorrectly:
 
 
 class TestTheLadderRungs:
-    """Each rung, and why it sits where it does."""
+    """The two rungs that are used, and the one that is not."""
 
     def test_io_hierarchy_is_the_first_rung(self):
         with pytest.raises(TypeError, match=r"io\.TextIOBase"):
             ext.binary_read_all(io.StringIO(TEXT))
         with pytest.raises(TypeError, match=r"io\.RawIOBase or io\.BufferedIOBase"):
             ext.text_read_all(io.BytesIO(BYTES))
-
-    def test_codecs_wrappers_are_recognised_before_mode(self, files):
-        """`codecs.getreader` reports the *wrapped* file's mode of 'rb' while producing str.
-
-        Anything that consulted `mode` first would call this binary and get it backwards, which is
-        what `pyo3-filelike` does.
-        """
-        reader = codecs.getreader("utf-8")(open(files["bin"], "rb"))
-        assert reader.mode == "rb"
-        assert ext.text_read_chars(reader, 5) == TEXT[:5]
-
-        with pytest.raises(TypeError, match="codecs stream wrapper"):
-            ext.binary_read_all(codecs.getreader("utf-8")(open(files["bin"], "rb")))
 
     def test_encoding_attribute_rung(self):
         class HasEncoding:
@@ -163,32 +161,40 @@ class TestTheLadderRungs:
         with pytest.raises(TypeError, match="str `encoding` attribute"):
             ext.binary_read_all(HasEncoding())
 
-    def test_mode_attribute_rung(self):
-        """The last resort, and what `SpooledTemporaryFile` leaves to go on."""
+    def test_mode_is_never_consulted(self):
+        """It would settle 23 more objects, and be wrong about two of them.
 
-        class ModeR:
-            mode = "r"
+        Both are `codecs` wrappers, which report the *wrapped* binary file's mode while producing
+        str. Rather than special-casing the exception, the unreliable signal is simply not used:
+        an object whose `mode` is the only thing it says about itself is duck typed.
+        """
+
+        class ModeSaysBinaryButReadsText:
+            mode = "rb"
 
             def read(self, size=-1, /) -> str:
                 return TEXT[:size]
 
-        class ModeRB:
-            mode = "rb"
+        class ModeSaysTextButReadsBytes:
+            mode = "r"
 
             def read(self, size=-1, /) -> bytes:
                 return BYTES[:size]
 
-        assert ext.text_read_chars(ModeR(), 4) == TEXT[:4]
-        assert ext.binary_read_exactly(ModeRB(), 4) == BYTES[:4]
-        with pytest.raises(TypeError, match=r"`mode` attribute does not contain 'b'"):
-            ext.binary_read_all(ModeR())
-        with pytest.raises(TypeError, match=r"`mode` attribute contains 'b'"):
-            ext.text_read_all(ModeRB())
+        # Both are accepted for what they actually are, because `mode` is not believed either way.
+        assert ext.text_read_chars(ModeSaysBinaryButReadsText(), 4) == TEXT[:4]
+        assert ext.binary_read_exactly(ModeSaysTextButReadsBytes(), 4) == BYTES[:4]
 
-    def test_a_property_that_raises_does_not_break_classification(self):
+    def test_the_real_codecs_readers_work_without_being_special_cased(self, files):
+        """The case that made `mode` untrustworthy, handled by not trusting `mode`."""
+        reader = codecs.getreader("utf-8")(open(files["bin"], "rb"))
+        assert reader.mode == "rb"  # it does say this
+        assert ext.text_read_chars(reader, 5) == TEXT[:5]  # and it is text anyway
+
+    def test_an_encoding_property_that_raises_does_not_break_classification(self):
         class Awkward:
             @property
-            def mode(self):
+            def encoding(self):
                 raise RuntimeError("boom")
 
             def read(self, size=-1, /) -> bytes:
@@ -196,14 +202,39 @@ class TestTheLadderRungs:
 
         assert ext.binary_read_exactly(Awkward(), 4) == BYTES[:4]
 
-    def test_a_non_string_mode_is_ignored(self):
-        class NumericMode:
-            mode = 0o644
+    def test_a_non_string_encoding_is_ignored(self):
+        class NumericEncoding:
+            encoding = 42
 
             def read(self, size=-1, /) -> bytes:
                 return BYTES[:size]
 
-        assert ext.binary_read_exactly(NumericMode(), 4) == BYTES[:4]
+        assert ext.binary_read_exactly(NumericEncoding(), 4) == BYTES[:4]
+
+
+class TestFallsBackToDuckTyping:
+    """The objects no trustworthy signal covers. Each works in its correct kind."""
+
+    def test_they_work_as_binary(self, files):
+        for name, factory in duck_typed_factories(files).items():
+            if name == "codecs.getreader":
+                continue  # genuinely text
+            handle = factory()
+            try:
+                ext.binary_read_exactly(handle, 4)
+            except Exception as err:  # noqa: BLE001
+                pytest.fail(f"{name} should work as binary: {err}")
+
+    def test_codecs_getreader_works_as_text(self, files):
+        reader = duck_typed_factories(files)["codecs.getreader"]()
+        assert ext.text_read_chars(reader, 4) == TEXT[:4]
+
+    def test_using_one_in_the_wrong_kind_is_caught_at_the_first_read(self, files):
+        """Not at the boundary, which is the price of not guessing. Still an error, with a
+        message that says what to do."""
+        handle = duck_typed_factories(files)["SpooledTemporaryFile wb+"]()
+        with pytest.raises(OSError, match="did not return str.*taken at its word"):
+            ext.text_read_chars(handle, 4)
 
 
 class TestDuckTypingIsTheFallback:
@@ -285,56 +316,57 @@ class TestDuckTypingIsTheFallback:
             ext.text_read_chars(SilentlyBinary(), 4)
 
 
-class TestTheMoodOfTheModeAttribute:
-    """`mode` is the least reliable rung, so what it can and cannot do is pinned here.
+class TestTheEscapeHatch:
+    """`Unchecked` skips the payload-kind check and keeps the capability checks.
 
-    A sweep of forty standard-library file-like objects found `mode` disagreeing with what `read`
-    actually returns in exactly two of them, `codecs.getreader(..)` and `codecs.open(..)`, both of
-    which report the *wrapped* file's mode. Both are caught a rung earlier, by name. What is left
-    is a third-party wrapper doing the same thing without deriving from the `codecs` classes.
+    Rarely needed now that only trustworthy signals are used: an object of no recognisable kind is
+    accepted rather than refused. What is left is an object that positively misidentifies itself,
+    which takes deriving from the wrong half of the `io` hierarchy or reporting an `encoding`
+    while dealing in bytes.
     """
 
-    def test_the_residual_limitation_is_real(self):
-        """A codecs-alike that is not a codecs subclass is classified by its `mode` and refused.
+    def test_an_object_that_misreports_an_encoding_is_refused(self):
+        class BinaryButClaimsAnEncoding:
+            encoding = "utf-8"  # for its own purposes; it still deals in bytes
 
-        This is the documented limitation. It is a false rejection rather than a corruption, and
-        the message names `mode` as the reason so it is diagnosable.
-        """
+            def read(self, size=-1, /) -> bytes:
+                return BYTES[:size]
 
-        class HomeGrownReader:
-            """Wraps a binary file and decodes it, like codecs, but inherits from nothing."""
+        with pytest.raises(TypeError, match="str `encoding` attribute"):
+            ext.binary_read_exactly(BinaryButClaimsAnEncoding(), 4)
 
-            def __init__(self, inner):
-                self._inner = inner
-                self.mode = inner.mode  # "rb", copied from the file underneath
+    def test_the_escape_hatch_handles_it(self, files):
+        class TextInBinaryClothing(io.RawIOBase):
+            """Derives from the binary half of `io` but reads str, so it is refused as text."""
 
-            def read(self, size=-1, /) -> str:
-                return self._inner.read(size).decode("utf-8")
+            def __init__(self):
+                self.left = TEXT
 
-        with open(__file__, "rb") as inner:
-            with pytest.raises(TypeError, match=r"`mode` attribute contains 'b'"):
-                ext.text_read_all(HomeGrownReader(inner))
-
-    def test_the_escape_hatch_handles_it(self):
-        """`py_new_unchecked` skips the payload-kind check and keeps the capability checks."""
-
-        class HomeGrownReader:
-            def __init__(self, inner):
-                self._inner = inner
-                self.mode = inner.mode
+            def readable(self):
+                return True
 
             def read(self, size=-1, /) -> str:
-                return self._inner.read(size).decode("utf-8")
+                if size is None or size < 0:
+                    chunk, self.left = self.left, ""
+                else:
+                    chunk, self.left = self.left[:size], self.left[size:]
+                return chunk
 
-        with open(__file__, "rb") as inner:
-            got = ext.text_read_all_unchecked(HomeGrownReader(inner))
-        assert "the mood of the mode attribute" in got.lower()
+        with pytest.raises(TypeError, match="io.RawIOBase"):
+            ext.text_read_all(TextInBinaryClothing())
+        assert ext.text_read_all_unchecked(TextInBinaryClothing()) == TEXT
 
     def test_the_escape_hatch_still_checks_capabilities(self):
         with pytest.raises(TypeError, match=r"has no \.read\(\) method"):
             ext.text_read_all_unchecked(object())
 
-    def test_mode_never_reaches_the_type_stubs(self, stub_source):
-        """It is a runtime signal only. The protocols come from the Rust type, so nothing an
-        object says about itself can influence what the type checker demands."""
+    def test_the_escape_hatch_keeps_its_annotation(self, stub_source):
+        """`Unchecked<TextRead>` carries the same protocol as `TextRead`, so reaching for it does
+        not cost the signature."""
+        assert "def text_read_all_unchecked(file: SupportsTextRead) -> str" in stub_source
+
+    def test_no_signal_reaches_the_type_stubs(self, stub_source):
+        """Classification is a runtime concern. The protocols come from the Rust type, so nothing
+        an object claims about itself can influence what the type checker demands."""
         assert "mode" not in stub_source
+        assert "encoding" not in stub_source

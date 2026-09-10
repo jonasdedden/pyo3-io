@@ -37,7 +37,7 @@ on `pyo3` and on this crate is the whole opt-in.
 |  | `pyo3-file` | `pyo3-filelike` | this crate |
 |---|---|---|---|
 | payload kind is static | no | **yes**, two types | yes |
-| kind decided by | `isinstance(obj, io.TextIOBase)` | `mode` attribute, binary if absent | the Rust type; the object is only checked for *contradicting* it |
+| kind decided by | `isinstance(obj, io.TextIOBase)` | `mode` attribute, binary if absent | the Rust type; the object is only checked for *contradicting* it, using signals measured not to lie |
 | duck-typed objects | accepted | accepted, then fail inside the extraction | accepted |
 | minimal writer (only `write`) | rejected | accepted | accepted |
 | override for a misidentified object | n/a | n/a | `Unchecked<..>`, keeps the annotation |
@@ -114,20 +114,22 @@ Decoding text and re-encoding it here would not round-trip the file's bytes.
 
 ### How the kind is worked out
 
-Only to *refuse* an object that contradicts what was asked for. Anything that says nothing about
-itself is taken at its word, so a class implementing nothing but the methods it needs works. The
-rungs are tried in order, most explicit first, because the cheap signals are the unreliable ones:
+Only to *refuse* an object that contradicts what was asked for. Anything else is taken at its
+word, so a class implementing nothing but the methods it needs works.
 
-1. **The `io` hierarchy.** `io.TextIOBase` means text, `io.RawIOBase` or `io.BufferedIOBase` mean
-   bytes. Definitive, and it settles nearly everything in the standard library.
-2. **The `codecs` stream wrappers.** `StreamReader`, `StreamWriter` and `StreamReaderWriter` are
-   outside the `io` hierarchy entirely and decode to `str`.
-3. **A `str` `encoding` attribute.** Only a text stream has one to report.
-4. **A self-declared `mode`.** `'b'` means bytes. This is what `tempfile.SpooledTemporaryFile`
-   leaves to go on, since it derives from `io.IOBase` without saying which half.
-5. **Nothing.** Accepted either way; the capability checks are the only requirement.
+Only signals that do not lie are used. Measured across forty standard-library file-like objects:
 
-Rung 2 has to come before rung 4, and this is why:
+| signal | right | wrong | says nothing |
+|---|---|---|---|
+| the `io` hierarchy | 28 | 0 | 7 |
+| a `str` `encoding` attribute | 11 | 0 | 24 |
+| a `mode` attribute | 23 | **2** | 10 |
+
+So the ladder is: `io.TextIOBase` means text and `io.RawIOBase`/`io.BufferedIOBase` mean bytes;
+failing that, a `str` `encoding` means text; failing that, nothing is assumed.
+
+`mode` would settle twenty-three more objects and be wrong about two, and it is not used. Both
+wrong ones are `codecs`:
 
 ```python
 >>> reader = codecs.getreader("utf-8")(open(path, "rb"))
@@ -137,49 +139,44 @@ Rung 2 has to come before rung 4, and this is why:
 <class 'str'>
 ```
 
-It reports the *wrapped* file's mode while producing `str`. Anything consulting `mode` first calls
-it binary and gets it exactly backwards — which is what `pyo3-filelike` does, since `mode` is its
-only signal.
+It wraps a binary file and reports *that* file's mode while producing `str`. `pyo3-filelike` has
+`mode` as its only signal and gets this exactly backwards.
+
+An earlier version of this crate kept `mode` and special-cased the `codecs` classes by name ahead
+of it. That works, but it is the wrong shape: it uses an unreliable signal and then patches the
+one place the unreliability is known to show. Dropping both leaves fewer objects classified and
+none misclassified, which is the better trade:
+
+```text
+  [io, codecs, encoding, mode]   34 classified, 1 duck typed, 0 wrong
+  [io, encoding, mode]           33 classified, 1 duck typed, 1 wrong  <- special case removed only
+  [io, encoding]                 30 classified, 5 duck typed, 0 wrong  <- this
+```
+
+The five that fall through are `tempfile.NamedTemporaryFile`,
+`tempfile.SpooledTemporaryFile(mode="wb+")`, `codecs.getreader(..)`, `codecs.EncodedFile(..)` and
+`mmap`. Every one works in its correct kind. Using one in the wrong kind is caught at the first
+read rather than at the boundary, with a message saying what to do:
+
+```text
+OSError: read() did not return str (...). This is a text file-like object, and the object did not
+identify itself as binary, so it was taken at its word. If it deals in bytes, ask for it as a
+binary PyFile, or wrap it with io.TextIOWrapper on the Python side.
+```
 
 `test_classification.py` runs every rung and every standard-library file-like object I could find
 — `gzip`, `bz2`, `lzma`, `zipfile`, `tarfile`, `tempfile`, `socket.makefile`, `subprocess` pipes,
-`codecs`, `os.fdopen`, `sys.stdout` — through both kinds, asserting each is accepted by one and
-refused by the other.
+`codecs`, `os.fdopen`, `sys.stdout` — through both kinds.
 
-#### The limits of rung 4
-
-A sweep of forty standard-library file-like objects found `mode` disagreeing with what `read`
-actually returns in exactly two of them, and both are the `codecs` cases above. Ten more have no
-usable `mode` at all — `io.BytesIO`, `io.StringIO`, `gzip.open(.., "rt")`, `mmap`, a text
-`subprocess` pipe — which is why `mode` cannot be the primary signal either. Everything else
-agrees.
-
-So the residual risk is a *third-party* wrapper that copies the `codecs` pattern without deriving
-from the `codecs` classes. That is a false rejection rather than a corruption, the message names
-`mode` as the reason, and [`Unchecked`] is the way to say you know better:
+Nothing an object says about itself reaches the type stubs. The protocols come from the Rust type
+alone, so classification only decides whether a particular object is let through at runtime.
+[`Unchecked`] skips it for an object that positively misidentifies itself, and carries the same
+protocol so it costs nothing in the annotation:
 
 ```rust,ignore
 #[pyfunction]
 fn read_it(source: Unchecked<TextRead>) -> PyResult<String> { .. }
 // still generates: def read_it(source: SupportsTextRead) -> str: ...
-```
-
-It skips the payload-kind check and keeps the capability checks, and it carries the same protocol,
-so reaching for it costs nothing in the annotation.
-
-`mode` never reaches the type stubs. The protocols come from the Rust type alone, so nothing an
-object claims about itself can influence what the type checker demands — only whether that
-particular object is let through at runtime.
-
-Rung 5 is the one that cannot be checked, so when a duck-typed object turns out to deal in the
-other payload after all, the error says what to do about it rather than surfacing the raw
-extraction failure:
-
-```text
-OSError: read() did not return bytes (TypeError: 'str' object cannot be converted to 'PyBytes').
-This is a binary file-like object, and the object did not identify itself as text, so it was taken
-at its word. If it deals in str, ask for it as a text PyFile, or wrap it with io.TextIOWrapper on
-the Python side.
 ```
 
 ### Binary
@@ -385,7 +382,7 @@ its classes belong. The `pyo3` crate itself needs no change.
   does, for all thirty aliases.
 - **3 comparison tests** (`tests/comparison.rs`) — the type-level claims the table above makes
   about `pyo3-filelike`, so it fails rather than going quietly out of date.
-- **174 runtime tests** (`pytests/python/`) — payload round-tripping, character-vs-byte counting,
+- **178 runtime tests** (`pytests/python/`) — payload round-tripping, character-vs-byte counting,
   the classification ladder against every standard-library file-like object, capability checks,
   misbehaving objects, and two files of side-by-side comparisons asserting both what `pyo3-file`
   and `pyo3-filelike` do today and what this crate does instead.
