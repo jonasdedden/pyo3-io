@@ -131,22 +131,53 @@ one check and be wrong: `tempfile.SpooledTemporaryFile` derives from `IOBase` al
 Every method the Rust side will call is looked for up front, with `hasattr`. On Python 3.14 and
 newer, `io.Reader` and `io.Writer` are accepted as an alternative answer for `read` and `write`.
 
-Despite how typeshed spells them, they are not `typing` Protocols: they are C-implemented ABCs
-whose `__subclasshook__` looks for the method on the *class*. That is a different question from
-the one `hasattr` asks, and the two disagree in both directions:
+They are worth being precise about, because the documentation and the implementation disagree.
+[The docs](https://docs.python.org/3/library/io.html#static-typing) say they are protocols
+"decorated with `@typing.runtime_checkable`", and typeshed declares them
+`class Reader(Protocol[_T_co])`. The runtime class is neither:
+
+```python
+# CPython 3.14, Lib/io.py
+class Reader(metaclass=abc.ABCMeta):
+    """Protocol for simple I/O reader instances."""
+    @abc.abstractmethod
+    def read(self, size=..., /): ...
+    @classmethod
+    def __subclasshook__(cls, C):
+        if cls is Reader:
+            return _check_methods(C, "read")
+```
+
+An ABC with a `__subclasshook__`, like `collections.abc.Iterable` — `_is_protocol` is absent,
+`typing.Protocol` is not in the MRO. Nothing has to inherit from it: `BufferedReader`'s MRO is
+`[BufferedReader, _BufferedIOBase, _IOBase, object]` and it passes `isinstance` through the hook
+alone, as does a class inheriting from nothing at all.
+
+For `isinstance` purposes the behaviour is the same as a real `runtime_checkable` protocol anyway
+— both look at the class, so a `read` served by `__getattr__` fails both. Where it differs from
+`hasattr` is in both directions:
 
 | | `hasattr` | `isinstance(.., io.Reader)` |
 |---|---|---|
-| `read` served by `__getattr__` | yes | no — the hook inspects the class |
+| `read` served by `__getattr__` | yes | no — the check looks at the class |
 | `io.Reader.register(Cls)`, no `read` | no | yes — an explicit declaration |
 
 So either answer counts. One is a working implementation and the other is the class author saying
-so on purpose; requiring both would turn away a `__getattr__`-based reader that works today. This
-is wider than `hasattr` alone and never narrower.
+so on purpose; requiring both would turn away a `__getattr__`-based reader that works today.
 
-They say nothing about the payload kind, incidentally — `isinstance` against a parameterised
-generic raises, so `io.Reader[bytes]` is not a question that can be asked at runtime. They are a
-presence check, not a classification.
+**What this actually buys** is narrow, and worth stating plainly: `hasattr` already covered the
+common path, so the only new acceptance is a class that declares itself with `register()`. The
+reason it is worth having at all is that there was previously no runtime answer to "does this
+support reading" in the standard library — `_typeshed.SupportsRead` is a stubs-only name and
+`import _typeshed` raises `ModuleNotFoundError` — so `hasattr` was the only option. On 3.14 there
+is a canonical spelling, and this defers to it.
+
+What they do **not** provide is the payload kind. `isinstance(x, io.Reader[bytes])` raises
+"argument 2 cannot be a parameterized generic", so they are a presence check and nothing more.
+`io.Reader[bytes]` is a valid *annotation* — typeshed types it as `read(size=..., /) -> bytes`,
+which is very nearly this crate's `SupportsBinaryRead` — but it only covers a lone `read` or
+`write`, not the combinations with `seek` and `fileno`, and it would make the generated stubs
+depend on the Python version. The generated protocols stay.
 
 **Nothing is called on the object during extraction.** That rules out the two things that would
 otherwise classify far more of them:
@@ -447,7 +478,7 @@ its classes belong. The `pyo3` crate itself needs no change.
   does, for all thirty aliases.
 - **3 comparison tests** (`tests/comparison.rs`) — the type-level claims the table above makes
   about `pyo3-filelike`, so it fails rather than going quietly out of date.
-- **197 runtime tests** (`pytests/python/`) — payload round-tripping, character-vs-byte counting,
+- **200 runtime tests** (`pytests/python/`) — payload round-tripping, character-vs-byte counting,
   the classification ladder against every standard-library file-like object, capability checks,
   misbehaving objects, and two files of side-by-side comparisons asserting both what `pyo3-file`
   and `pyo3-filelike` do today and what this crate does instead.

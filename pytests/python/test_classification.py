@@ -27,6 +27,8 @@ import tarfile
 import tempfile
 import zipfile
 
+import typing
+
 import pytest
 
 import pyo3_file_typed_tests as ext
@@ -442,17 +444,55 @@ IO_PROTOCOLS = hasattr(io, "Reader") and hasattr(io, "Writer")
 class TestIoReaderAndWriter:
     """`io.Reader` and `io.Writer`, new in 3.14, accepted alongside `hasattr`.
 
-    They are not `typing` Protocols despite how typeshed spells them: they are C-implemented ABCs
-    whose `__subclasshook__` looks for the method on the *class*. That is a different question
-    from the one `hasattr` asks, and the two disagree in both directions, so either answer counts.
+    The docs call them protocols "decorated with `@typing.runtime_checkable`" and typeshed
+    declares them `class Reader(Protocol[_T_co])`. The runtime class is neither: it is an ABC with
+    a `__subclasshook__`, like `collections.abc.Iterable`. The `isinstance` behaviour matches a
+    real runtime_checkable protocol anyway; where it differs is from `hasattr`, in both
+    directions, so either answer counts.
     """
 
     def test_what_they_actually_are(self):
         import abc
 
         assert isinstance(io.Reader, abc.ABCMeta)
+        assert typing.Protocol not in io.Reader.__mro__
         assert not getattr(io.Reader, "_is_protocol", False)
         assert not getattr(io.Reader, "_is_runtime_protocol", False)
+
+    def test_nothing_has_to_inherit_from_them(self):
+        """The `__subclasshook__` does the work, so `isinstance` passes without inheritance."""
+        with open("/etc/hostname", "rb") as handle:
+            assert io.Reader not in type(handle).__mro__
+            assert isinstance(handle, io.Reader)
+
+        class InheritsNothing:
+            def read(self, size=-1, /) -> bytes:
+                return b""
+
+        assert isinstance(InheritsNothing(), io.Reader)
+
+    def test_they_behave_like_a_real_runtime_checkable_protocol(self):
+        """So the ABC-versus-Protocol difference is in what they are, not in what they do."""
+
+        @typing.runtime_checkable
+        class SupportsRead(typing.Protocol):
+            def read(self, size: int = ..., /): ...
+
+        class ViaGetattr:
+            def __getattr__(self, name):
+                if name == "read":
+                    return lambda size=-1, /: b""
+                raise AttributeError(name)
+
+        obj = ViaGetattr()
+        assert hasattr(obj, "read")
+        assert not isinstance(obj, io.Reader)
+        assert not isinstance(obj, SupportsRead)  # identical verdict
+
+    def test_typeshed_supports_read_is_not_importable_at_runtime(self):
+        """Which is why `hasattr` was the only option before 3.14."""
+        with pytest.raises(ModuleNotFoundError):
+            __import__("_typeshed")
 
     def test_they_cannot_be_subscripted_for_isinstance(self):
         """So they say nothing about the payload kind, only that a method is there."""

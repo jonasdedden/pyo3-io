@@ -280,13 +280,19 @@ where
                 Err(missing(method)?)
             }
         };
-        // `io.Reader` and `io.Writer`, new in 3.14, are ABCs whose `__subclasshook__` looks for
-        // the method on the *class*. That is not the same question `hasattr` asks, and the two
-        // disagree in both directions: a `read` served by `__getattr__` satisfies `hasattr` but
-        // not the ABC, and a class passed to `io.Reader.register(..)` satisfies the ABC while
-        // having no `read` at all. Either is a good enough answer -- one is a working
-        // implementation, the other an explicit declaration -- so this accepts either, which is
-        // wider than `hasattr` alone and never narrower.
+        // `io.Reader` and `io.Writer`, new in 3.14. The docs call them protocols decorated with
+        // `@typing.runtime_checkable` and typeshed declares them as such, but the runtime class
+        // is an ABC with a `__subclasshook__`, like `collections.abc.Iterable`. For `isinstance`
+        // that behaves the same as a real runtime-checkable protocol; where it differs is from
+        // `hasattr`, in both directions. A `read` served by `__getattr__` satisfies `hasattr` but
+        // not the class-level check, and a class passed to `io.Reader.register(..)` satisfies the
+        // check while having no `read` at all.
+        //
+        // Either is a good enough answer -- one is a working implementation, the other an
+        // explicit declaration -- so this accepts either, which is wider than `hasattr` alone and
+        // never narrower. The gain is only that `register()` case; what makes it worth having is
+        // that there was no runtime answer to this question in the standard library before 3.14,
+        // `_typeshed.SupportsRead` being a stubs-only name.
         let require_protocol = |protocol: Option<&Bound<'_, PyAny>>,
                                 name: &Bound<'_, PyString>,
                                 method: &'static str|
