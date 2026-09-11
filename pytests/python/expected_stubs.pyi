@@ -42,6 +42,28 @@ class SupportsTextReadWrite(Protocol):
 class SupportsTextWrite(Protocol):
     def write(self, data: str, /) -> int | None: ...
 
+def bench_construct(obj: Any, implementation: str, count: int) -> None:
+    """
+    Measures only construction and destruction, without performing an I/O operation.
+    """
+
+def bench_read(obj: Any, implementation: str, chunk: int, verify: bool) -> tuple[int, bytes | None]:
+    """
+    chunk=0 uses read_to_end; positive chunks reuse one fixed buffer.
+    verify=true copies the complete result, for untimed correctness checks only.
+    """
+
+def bench_text_read(obj: Any, implementation: str) -> str:
+    """
+    Whole text streams only: the unit of work is the identical Unicode string.
+    Legacy/filelike UTF-8 conversion is part of their adaptation cost.
+    """
+
+def bench_write(obj: Any, implementation: str, data: bytes, count: int, flush: bool) -> int:
+    """
+    Constructs once and reuses the borrowed input slice; flush is identical for all paths.
+    """
+
 def binary_everything(file: SupportsBinaryReadWriteSeekFileno, data: bytes) -> tuple[int, int]: ...
 def binary_fileno(file: SupportsBinaryFileno) -> int: ...
 

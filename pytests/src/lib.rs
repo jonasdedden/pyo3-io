@@ -9,6 +9,8 @@ use pyo3_file_typed::{
 };
 use std::io::{Read, Seek, SeekFrom, Write};
 
+mod benchmarks;
+
 // ---------------------------------------------------------------- binary
 
 /// Reads the whole stream with bounded reads and standard Rust retry semantics.
@@ -299,6 +301,9 @@ fn filelike_write(obj: Bound<'_, PyAny>, data: &[u8]) -> PyResult<usize> {
 
 #[pymodule]
 mod pyo3_file_typed_tests {
+    #[pymodule_export]
+    use super::benchmarks::{bench_construct, bench_read, bench_text_read, bench_write};
+
     #[pymodule_export]
     use super::{
         binary_everything, binary_fileno, binary_fileno_via_as_raw_fd, binary_read_all,

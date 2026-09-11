@@ -101,7 +101,7 @@ class TestStubContent:
     def test_every_typed_entry_point_is_annotated(self, stub_source):
         # `legacy_` is pyo3-file and `filelike_` is pyo3-filelike; they are the comparison
         # functions and are expected to be `Any`.
-        comparison = ("def legacy_", "def filelike_")
+        comparison = ("def legacy_", "def filelike_", "def bench_")
         for line in stub_source.splitlines():
             if line.startswith("def ") and not line.startswith(comparison):
                 assert ": Supports" in line or ": int" in line or ": bytes" in line or ": str" in line, line
