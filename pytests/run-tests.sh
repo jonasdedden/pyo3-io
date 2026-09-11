@@ -39,11 +39,10 @@ cargo test --manifest-path "$crate/Cargo.toml"
 cargo test --manifest-path "$crate/Cargo.toml" --all-features
 
 step "build the release test extension"
-cargo build --manifest-path "$here/Cargo.toml" --release
+artifact="$(python3 "$here/python/_extension.py" --profile release)"
 
 if (( stubs )); then
     step "generate type stubs"
-    artifact="$(python3 "$here/python/_extension.py" --profile release)"
     output="$here/typecheck/pyo3_file_typed_tests-stubs"
     if [[ -n "${PYO3_INTROSPECTION:-}" ]]; then
         "$PYO3_INTROSPECTION" "$artifact" pyo3_file_typed_tests "$output"
