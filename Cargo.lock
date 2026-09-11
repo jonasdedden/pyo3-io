@@ -115,6 +115,7 @@ dependencies = [
  "libc",
  "pyo3",
  "pyo3-filelike",
+ "serde_json",
  "thiserror",
  "trybuild",
 ]

@@ -11,6 +11,7 @@ mod binary;
 mod error;
 #[cfg(unix)]
 mod fd;
+mod file_types;
 #[cfg(feature = "experimental-inspect")]
 mod introspection;
 mod mode;

@@ -50,7 +50,7 @@ Cloning a wrapper references the same Python object, not an independent stream.
 The aliases combine `Binary` or `Text` with `Read`, `Write`, `Seek`, and `Fileno`,
 in that order: for example, `BinaryReadWriteSeek` and `TextReadFileno`.
 All 30 nonempty combinations, plus their `Bound…<'py>` forms, are defined in the
-library source and available without optional features or code generation.
+shared `src/file_types.rs` macro table and available without optional features.
 The underlying types are `PyBinaryFile<READ, WRITE, SEEK, FILENO>` and
 `PyTextFile<READ, WRITE, SEEK, FILENO>`.
 
@@ -151,6 +151,12 @@ a Python reference alone does not prevent that race.
 `experimental-inspect` supplies structural capability protocols to PyO3's
 experimental inspection metadata. For example, a `TextReadSeek` argument describes
 `read(size) -> str | None`, `seek(offset, whence) -> int`, and `tell() -> int`.
+
+The same macro table drives the aliases, protocol declarations and annotation lookup.
+Macros emit uniquely named metadata statics; a small `const` encoder supplies their
+class/function envelopes and delegates type expressions to PyO3's serializers.
+There is no build script, generated Rust source, or `OUT_DIR` include. The encoder
+uses experimental, implementation-level PyO3 APIs isolated in the introspection module.
 
 Generating usable stubs still requires a custom `pyo3-introspection` generator
 with `attach_to_root` support; enabling the feature alone is not sufficient.
