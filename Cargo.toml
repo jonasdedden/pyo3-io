@@ -13,20 +13,13 @@ default = []
 experimental-inspect = ["pyo3/experimental-inspect"]
 
 [dependencies]
-# Path dependency on the checkout carrying the `attach_to_root` support in `pyo3-introspection`,
-# branch `introspection-attach-to-root`. The `pyo3` crate itself needs no change; it is the stub
-# *generator* in that checkout that does.
-pyo3 = { path = "../pyo3" }
+pyo3 = "0.29.2"
 thiserror = "2"
 
 [dev-dependencies]
 trybuild = "1.0"
 # Only for tests/comparison.rs, which checks the claims the README makes about it.
 pyo3-filelike = "0.5.3"
-
-# pyo3-filelike resolves pyo3 from crates.io; without this the test build would contain two.
-[patch.crates-io]
-pyo3 = { path = "../pyo3" }
 
 [lints.rust]
 missing_docs = "warn"
