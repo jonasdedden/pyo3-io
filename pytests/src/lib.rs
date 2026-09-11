@@ -11,7 +11,7 @@ use std::io::{Read, Seek, SeekFrom, Write};
 
 // ---------------------------------------------------------------- binary
 
-/// Reads the whole stream. One `read(-1)` rather than a call per chunk.
+/// Reads the whole stream with bounded reads and standard Rust retry semantics.
 #[pyfunction]
 fn binary_read_all(py: Python<'_>, mut file: BinaryRead) -> PyResult<Py<PyBytes>> {
     let mut buffer = Vec::new();

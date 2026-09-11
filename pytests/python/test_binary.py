@@ -63,11 +63,14 @@ class TestReadAll:
         """The case that motivated the split: a binary stream must not be decoded."""
         assert ext.binary_read_all(io.BytesIO(GZIP_MAGIC)) == GZIP_MAGIC
 
-    def test_read_to_end_is_one_call(self):
-        """`read(-1)` once, then one empty call to confirm the end. Not one call per chunk."""
-        reader = DuckBinaryReader(os.urandom(1 << 16))
-        ext.binary_read_all(reader)
-        assert reader.calls == 2
+    def test_read_to_end_supports_positive_size_only(self):
+        class PositiveReader(DuckBinaryReader):
+            def read(self, size, /):
+                assert size > 0
+                return super().read(size)
+
+        data = os.urandom(1 << 16)
+        assert ext.binary_read_all(PositiveReader(data)) == data
 
 
 class TestReadExactly:

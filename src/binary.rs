@@ -11,8 +11,7 @@
 use crate::{Binary, BoundFile, Error, PyFile};
 use pyo3::intern;
 use pyo3::prelude::*;
-use pyo3::types::PyBytes;
-use std::borrow::Cow;
+use pyo3::types::{PyBytes, PyMemoryView};
 use std::io::{self, Read, Seek, SeekFrom, Write};
 
 impl<const WRITE: bool, const SEEK: bool, const FILENO: bool> Read
@@ -29,71 +28,34 @@ impl<const WRITE: bool, const SEEK: bool, const FILENO: bool> Read
             if res.is_none() {
                 return Err(Error::would_block_read());
             }
-            let bytes = res
-                .extract::<Cow<'_, [u8]>>()
-                .map_err(Error::wrong_payload::<Binary>)?;
+            // Bytes can be borrowed directly. Other buffers need a snapshot: interpreting
+            // them as a sequence loses multibyte formats and accepts non-buffer lists.
+            // memoryview.tobytes() safely flattens even strided buffers in C order, without
+            // exposing a borrowed slice of potentially mutable Python memory to Rust.
+            let snapshot;
+            let bytes = if let Ok(bytes) = res.cast::<PyBytes>() {
+                bytes.as_bytes()
+            } else {
+                snapshot = PyMemoryView::from(&res)
+                    .and_then(|view| view.call_method0(intern!(py, "tobytes")))
+                    .and_then(|bytes| bytes.cast_into::<PyBytes>().map_err(Into::into))
+                    .map_err(Error::wrong_payload::<Binary>)?;
+                snapshot.as_bytes()
+            };
             if bytes.len() > buf.len() {
                 return Err(Error::OverlongRead {
                     got: bytes.len(),
                     asked: buf.len(),
                 });
             }
-            buf[..bytes.len()].copy_from_slice(&bytes);
+            buf[..bytes.len()].copy_from_slice(bytes);
             Ok(bytes.len())
         })()
         .map_err(Into::into)
     }
 
-    /// Overridden to ask Python for the whole stream at once.
-    ///
-    /// The default implementation doubles its buffer as it goes, so the sizes it asks for sum to
-    /// twice the stream, each one a fresh Python object allocated and discarded. `read(-1)` gets
-    /// the same bytes in a single call, which is only safe to reach for because the payload kind
-    /// is known.
-    fn read_to_end(&mut self, out: &mut Vec<u8>) -> io::Result<usize> {
-        let obj = self.as_py_object();
-        let py = obj.py();
-        (|| -> Result<usize, Error> {
-            let before = out.len();
-            // Usually one call plus an empty one; the loop is only there for objects that hand
-            // back a partial result, which `read(-1)` is permitted to do.
-            loop {
-                let res = obj.call_method1(intern!(py, "read"), (-1i64,))?;
-                if res.is_none() {
-                    return Err(Error::would_block_read());
-                }
-                // Borrowed from the Python object and copied straight into `out`: extracting an
-                // owned `Vec` first would copy the whole stream an extra time.
-                let chunk = res
-                    .extract::<Cow<'_, [u8]>>()
-                    .map_err(Error::wrong_payload::<Binary>)?;
-                if chunk.is_empty() {
-                    break;
-                }
-                out.extend_from_slice(&chunk);
-            }
-            Ok(out.len() - before)
-        })()
-        .map_err(Into::into)
-    }
-
-    /// Overridden for the same reason as [`read_to_end`](Read::read_to_end).
-    ///
-    /// The bytes still have to be UTF-8 checked, because a binary object promises nothing about
-    /// its encoding. If the object is a text stream on the Python side, ask for it as a text file
-    /// instead and skip the check entirely.
-    fn read_to_string(&mut self, out: &mut String) -> io::Result<usize> {
-        let mut bytes = Vec::new();
-        let read = self.read_to_end(&mut bytes)?;
-        let text = String::from_utf8(bytes)
-            .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
-        if out.is_empty() {
-            *out = text;
-        } else {
-            out.push_str(&text);
-        }
-        Ok(read)
-    }
+    // Keep std's bulk defaults: they use bounded reads, retry Interrupted, and preserve
+    // read_to_string's partial-I/O-error and invalid-UTF-8 behavior.
 }
 
 impl<const READ: bool, const SEEK: bool, const FILENO: bool> Write
@@ -171,6 +133,10 @@ impl<const WRITE: bool, const SEEK: bool, const FILENO: bool> Read
 {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         Python::attach(|py| self.bind(py).read(buf))
+    }
+
+    fn read_exact(&mut self, buf: &mut [u8]) -> io::Result<()> {
+        Python::attach(|py| self.bind(py).read_exact(buf))
     }
 
     fn read_to_end(&mut self, out: &mut Vec<u8>) -> io::Result<usize> {
