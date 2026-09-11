@@ -167,7 +167,8 @@ fn legacy_read_chars(obj: Bound<'_, PyAny>, n: usize) -> PyResult<String> {
     let mut buffer = vec![0u8; n * 4];
     let read = file.read(&mut buffer)?;
     buffer.truncate(read);
-    String::from_utf8(buffer).map_err(|err| PyErr::new::<pyo3::exceptions::PyValueError, _>(err.to_string()))
+    String::from_utf8(buffer)
+        .map_err(|err| PyErr::new::<pyo3::exceptions::PyValueError, _>(err.to_string()))
 }
 
 /// The untyped equivalent of [`binary_fileno`]. `pyo3-file` exposes this through `AsRawFd`,
@@ -300,10 +301,12 @@ fn filelike_write(obj: Bound<'_, PyAny>, data: &[u8]) -> PyResult<usize> {
 mod pyo3_file_typed_tests {
     #[pymodule_export]
     use super::{
-        binary_everything, binary_fileno, binary_read_all, binary_read_exactly, binary_read_write,
-        binary_seek_roundtrip, binary_write, legacy_fileno, legacy_read_all,
-        legacy_read_all_text, legacy_read_chars, legacy_read_once, legacy_write, text_fileno, text_read_all, text_read_chars,
-        binary_fileno_via_as_raw_fd, binary_read_all_bound, read_on_another_thread, filelike_fileno, filelike_read_all, filelike_read_once, filelike_text_as_bytes,
-        filelike_text_read_all, filelike_write, text_read_all_unchecked, text_read_write, text_seek_roundtrip, text_write,
+        binary_everything, binary_fileno, binary_fileno_via_as_raw_fd, binary_read_all,
+        binary_read_all_bound, binary_read_exactly, binary_read_write, binary_seek_roundtrip,
+        binary_write, filelike_fileno, filelike_read_all, filelike_read_once,
+        filelike_text_as_bytes, filelike_text_read_all, filelike_write, legacy_fileno,
+        legacy_read_all, legacy_read_all_text, legacy_read_chars, legacy_read_once, legacy_write,
+        read_on_another_thread, text_fileno, text_read_all, text_read_all_unchecked,
+        text_read_chars, text_read_write, text_seek_roundtrip, text_write,
     };
 }

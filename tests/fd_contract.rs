@@ -54,8 +54,8 @@ fn unavailable_and_invalid_descriptors_are_errors() {
             c"fd_contract",
         )
         .unwrap();
-        let invalid = BinaryFileno::py_new(module.getattr("Invalid").unwrap().call0().unwrap())
-            .unwrap();
+        let invalid =
+            BinaryFileno::py_new(module.getattr("Invalid").unwrap().call0().unwrap()).unwrap();
         assert_eq!(
             invalid.try_clone_fd().unwrap_err().raw_os_error(),
             Some(libc::EBADF)

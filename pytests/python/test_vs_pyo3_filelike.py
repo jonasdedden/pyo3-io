@@ -82,9 +82,9 @@ class TestKindDetectionIsAHeuristic:
 
     def test_typed_refuses_duck_typed_text_at_the_type_checker(self, stub_source):
         """Structure decides, so this one is caught before it runs at all: `SupportsBinaryRead`
-        wants `read(...) -> ReadableBuffer`, which a `-> str` reader is not. See
+        wants `read(...) -> ReadableBuffer | None`, which a `-> str` reader is not. See
         typecheck/check_bad.py, case 2."""
-        assert "def read(self, size: int, /) -> ReadableBuffer: ..." in stub_source
+        assert "def read(self, size: int, /) -> ReadableBuffer | None: ..." in stub_source
 
     def test_pytextfile_checks_nothing_at_all(self):
         """Only `PyBinaryFile` has a mode check; a binary object is accepted as text."""

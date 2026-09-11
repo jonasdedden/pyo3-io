@@ -45,14 +45,14 @@ class SupportsTextWrite(Protocol):
 def binary_everything(file: SupportsBinaryReadWriteSeekFileno, data: bytes) -> tuple[int, int]: ...
 def binary_fileno(file: SupportsBinaryFileno) -> int: ...
 
-def binary_fileno_via_as_fd(file: SupportsBinaryFileno) -> int:
+def binary_fileno_via_as_raw_fd(file: SupportsBinaryFileno) -> int:
     """
-    Goes through `AsFd`, the way `rustix`, `nix` and `std` take a descriptor.
+    Raw descriptor compatibility; this does not promise a borrowed descriptor lifetime.
     """
 
 def binary_read_all(file: SupportsBinaryRead) -> bytes:
     """
-    Reads the whole stream. One `read(-1)` rather than a call per chunk.
+    Reads the whole stream with bounded reads and standard Rust retry semantics.
     """
 
 def binary_read_all_bound(file: SupportsBinaryRead) -> bytes:
@@ -155,7 +155,7 @@ def text_fileno(file: SupportsTextFileno) -> int: ...
 
 def text_read_all(file: SupportsTextRead) -> str:
     """
-    Reads the whole stream as text. One `read(-1)` and one `str` across the boundary.
+    Reads the whole stream as text using bounded character reads.
     """
 
 def text_read_all_unchecked(file: SupportsTextRead) -> str:
