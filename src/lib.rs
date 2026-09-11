@@ -15,6 +15,7 @@ mod fd;
 mod introspection;
 mod mode;
 mod text;
+mod write;
 
 pub use error::Error;
 pub use mode::{Binary, Mode, Text};

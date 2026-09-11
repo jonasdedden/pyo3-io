@@ -64,21 +64,12 @@ impl<const READ: bool, const SEEK: bool, const FILENO: bool> Write
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         let obj = self.as_py_object();
         let py = obj.py();
-        (|| -> Result<usize, Error> {
-            let res = obj.call_method1(intern!(py, "write"), (PyBytes::new(py, buf),))?;
-            if res.is_none() {
-                return Err(Error::would_block_write());
-            }
-            let written = res.extract::<usize>()?;
-            if written > buf.len() {
-                return Err(Error::ImpossibleWriteCount {
-                    reported: written,
-                    available: buf.len(),
-                    unit: "bytes",
-                });
-            }
-            Ok(written)
-        })()
+        crate::write::write_result(
+            py,
+            obj.call_method1(intern!(py, "write"), (PyBytes::new(py, buf),)),
+            buf.len(),
+            "bytes",
+        )
         .map_err(Into::into)
     }
 

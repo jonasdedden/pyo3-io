@@ -89,22 +89,12 @@ impl<const READ: bool, const SEEK: bool, const FILENO: bool>
     pub fn write_str(&mut self, text: &str) -> io::Result<usize> {
         let obj = self.as_py_object();
         let py = obj.py();
-        (|| -> Result<usize, Error> {
-            let res = obj.call_method1(intern!(py, "write"), (text,))?;
-            if res.is_none() {
-                return Err(Error::would_block_write());
-            }
-            let written = res.extract::<usize>()?;
-            let available = text.chars().count();
-            if written > available {
-                return Err(Error::ImpossibleWriteCount {
-                    reported: written,
-                    available,
-                    unit: "characters",
-                });
-            }
-            Ok(written)
-        })()
+        crate::write::write_result(
+            py,
+            obj.call_method1(intern!(py, "write"), (text,)),
+            text.chars().count(),
+            "characters",
+        )
         .map_err(Into::into)
     }
 
