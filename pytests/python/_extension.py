@@ -11,7 +11,7 @@ import sysconfig
 import tempfile
 
 ROOT = Path(__file__).resolve().parent.parent
-MODULE = "pyo3_file_typed_tests"
+MODULE = "pyo3_typed_io_tests"
 
 
 def artifact(profile: str | None = None) -> Path:

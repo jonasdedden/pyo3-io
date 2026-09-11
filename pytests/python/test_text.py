@@ -5,7 +5,7 @@ import io
 import pytest
 from helpers import DuckTextReader, DuckTextWriter, PartialTextWriter
 
-import pyo3_file_typed_tests as ext
+import pyo3_typed_io_tests as ext
 
 # 1, 2, 3 and 4 byte characters, so any byte/character confusion shows up immediately.
 MIXED = "aä€\U0001f600b"

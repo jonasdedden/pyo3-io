@@ -6,7 +6,7 @@ error[E0277]: `*mut pyo3::marker::Python<'static>` cannot be sent between thread
   |     |
   |     required by a bound introduced by this call
   |
-  = help: within `BoundFile<'_, pyo3_file_typed::Binary, true, false, false, false>`, the trait `Send` is not implemented for `*mut pyo3::marker::Python<'static>`
+  = help: within `BoundFile<'_, pyo3_typed_io::Binary, true, false, false, false>`, the trait `Send` is not implemented for `*mut pyo3::marker::Python<'static>`
 note: required because it appears within the type `PhantomData<*mut pyo3::marker::Python<'static>>`
  --> $RUST/core/src/marker.rs
   |
@@ -32,7 +32,7 @@ note: required because it appears within the type `pyo3::instance::Bound<'_, pyo
   |
   | pub struct Bound<'py, T>(Python<'py>, ManuallyDrop<Py<T>>);
   |            ^^^^^
-note: required because it appears within the type `BoundFile<'_, pyo3_file_typed::Binary, true, false, false, false>`
+note: required because it appears within the type `BoundFile<'_, pyo3_typed_io::Binary, true, false, false, false>`
  --> src/lib.rs
   |
   | pub struct BoundFile<

@@ -1,5 +1,5 @@
 //! The motivating case: a function generic over `io::Read` cannot be handed a text object.
-use pyo3_file_typed::TextRead;
+use pyo3_typed_io::TextRead;
 use std::io::Read;
 
 fn main() {}

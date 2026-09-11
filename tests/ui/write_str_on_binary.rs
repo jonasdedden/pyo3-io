@@ -1,5 +1,5 @@
 //! Writing `str` to a binary object would mean choosing an encoding here.
-use pyo3_file_typed::BinaryWrite;
+use pyo3_typed_io::BinaryWrite;
 
 fn main() {}
 

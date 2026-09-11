@@ -46,14 +46,14 @@ artifact="$(python3 "$here/python/_extension.py" --profile release)"
 
 if (( stubs )); then
     step "generate type stubs"
-    output="$here/typecheck/pyo3_file_typed_tests-stubs"
+    output="$here/typecheck/pyo3_typed_io_tests-stubs"
     if [[ -n "${PYO3_INTROSPECTION:-}" ]]; then
-        "$PYO3_INTROSPECTION" "$artifact" pyo3_file_typed_tests "$output"
+        "$PYO3_INTROSPECTION" "$artifact" pyo3_typed_io_tests "$output"
     else
         cargo run --locked --quiet -p pyo3-introspection \
             --manifest-path "$PYO3_CHECKOUT/Cargo.toml" \
             --target-dir "$here/target/introspection" -- \
-            "$artifact" pyo3_file_typed_tests "$output"
+            "$artifact" pyo3_typed_io_tests "$output"
     fi
 fi
 

@@ -1,5 +1,5 @@
 //! Seeking a file that was not asked to be seekable.
-use pyo3_file_typed::BinaryRead;
+use pyo3_typed_io::BinaryRead;
 use std::io::{Seek, SeekFrom};
 
 fn main() {}

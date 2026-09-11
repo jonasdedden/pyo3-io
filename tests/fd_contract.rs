@@ -3,7 +3,7 @@
 
 use pyo3::prelude::*;
 use pyo3::types::PyModule;
-use pyo3_file_typed::BinaryFileno;
+use pyo3_typed_io::BinaryFileno;
 use std::io::Read;
 use std::os::fd::AsRawFd;
 

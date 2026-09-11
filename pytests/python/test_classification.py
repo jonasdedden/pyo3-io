@@ -31,7 +31,7 @@ import typing
 
 import pytest
 
-import pyo3_file_typed_tests as ext
+import pyo3_typed_io_tests as ext
 
 BYTES = b"hello world " * 10
 TEXT = "hello world " * 10

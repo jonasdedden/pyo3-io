@@ -394,7 +394,7 @@ where
 ///
 /// ```rust,no_run
 /// use pyo3::prelude::*;
-/// use pyo3_file_typed::BinaryRead;
+/// use pyo3_typed_io::BinaryRead;
 /// use std::io::Read;
 ///
 /// #[pyfunction]
@@ -488,7 +488,7 @@ where
 ///
 /// ```rust,no_run
 /// use pyo3::prelude::*;
-/// use pyo3_file_typed::{TextRead, Unchecked};
+/// use pyo3_typed_io::{TextRead, Unchecked};
 ///
 /// #[pyfunction]
 /// fn read_it(mut source: Unchecked<TextRead>) -> PyResult<String> {

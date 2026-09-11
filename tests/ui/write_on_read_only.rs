@@ -1,5 +1,5 @@
 //! Writing a read-only file.
-use pyo3_file_typed::BinaryRead;
+use pyo3_typed_io::BinaryRead;
 use std::io::Write;
 
 fn main() {}

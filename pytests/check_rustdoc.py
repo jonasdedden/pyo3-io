@@ -17,7 +17,7 @@ from html.parser import HTMLParser
 from urllib.parse import unquote, urljoin, urlsplit
 
 ROOT = Path(__file__).resolve().parents[1]
-CRATE = "pyo3_file_typed"
+CRATE = "pyo3_typed_io"
 FAMILIES = {"PyBinaryFile", "PyTextFile", "BoundPyBinaryFile", "BoundPyTextFile"}
 COMMON = {
     "BinaryRead", "BinaryWrite", "BinaryReadSeek",

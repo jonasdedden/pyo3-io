@@ -6,7 +6,7 @@ error[E0277]: the trait bound `PyFile<Text, true, false, false, false>: std::io:
    |     |
    |     required by a bound introduced by this call
    |
-help: the trait `std::io::Read` is implemented for `PyFile<pyo3_file_typed::Binary, true, WRITE, SEEK, FILENO>`
+help: the trait `std::io::Read` is implemented for `PyFile<pyo3_typed_io::Binary, true, WRITE, SEEK, FILENO>`
   --> src/binary.rs
    |
    | / impl<const WRITE: bool, const SEEK: bool, const FILENO: bool> Read

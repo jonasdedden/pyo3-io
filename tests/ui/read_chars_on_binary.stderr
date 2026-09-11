@@ -1,5 +1,5 @@
-error[E0599]: no method named `read_chars` found for mutable reference `&mut PyFile<pyo3_file_typed::Binary, true, false, false, false>` in the current scope
+error[E0599]: no method named `read_chars` found for mutable reference `&mut PyFile<pyo3_typed_io::Binary, true, false, false, false>` in the current scope
  --> tests/ui/read_chars_on_binary.rs:7:18
   |
 7 |     let _ = file.read_chars(4);
-  |                  ^^^^^^^^^^ method not found in `&mut PyFile<pyo3_file_typed::Binary, true, false, false, false>`
+  |                  ^^^^^^^^^^ method not found in `&mut PyFile<pyo3_typed_io::Binary, true, false, false, false>`

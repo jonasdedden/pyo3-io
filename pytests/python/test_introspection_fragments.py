@@ -5,14 +5,14 @@ import json
 
 import pytest
 
-import pyo3_file_typed_tests as ext
+import pyo3_typed_io_tests as ext
 
 LIBRARY = ctypes.PyDLL(ext.__file__)
 CAPABILITIES = (("Read", 8), ("Write", 4), ("Seek", 2), ("Fileno", 1))
 
 
 def fragment(alias, suffix):
-    name = f"PYO3_INTROSPECTION_1_PYO3_FILE_TYPED_{alias}_{suffix}"
+    name = f"PYO3_INTROSPECTION_1_PYO3_TYPED_IO_{alias}_{suffix}"
     length = ctypes.c_uint32.in_dll(LIBRARY, name)
     # The encoder's repr(C) layout is a u32 followed immediately by JSON bytes.
     assert 0 < length.value < 16384
@@ -39,7 +39,7 @@ def nullable(value):
 def test_linked_protocol_matches_its_capabilities(kind, bits):
     alias = kind + "".join(name for name, bit in CAPABILITIES if bits & bit)
     protocol = f"Supports{alias}"
-    parent = f"pyo3-file-typed:{protocol}"
+    parent = f"pyo3-typed-io:{protocol}"
     assert fragment(alias, "protocol") == {
         "type": "class",
         "attach_to_root": True,

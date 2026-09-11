@@ -1,5 +1,5 @@
 //! The bound form cannot leave the thread; that is what the detached form is for.
-use pyo3_file_typed::BoundBinaryRead;
+use pyo3_typed_io::BoundBinaryRead;
 
 fn main() {}
 

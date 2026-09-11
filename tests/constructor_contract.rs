@@ -2,7 +2,7 @@
 
 use pyo3::prelude::*;
 use pyo3::types::PyModule;
-use pyo3_file_typed::{BinaryRead, BinaryWrite};
+use pyo3_typed_io::{BinaryRead, BinaryWrite};
 use std::io::{Read, Write};
 
 #[test]

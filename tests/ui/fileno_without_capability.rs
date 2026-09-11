@@ -1,5 +1,5 @@
 //! Asking for a file descriptor that was not required.
-use pyo3_file_typed::BinaryRead;
+use pyo3_typed_io::BinaryRead;
 
 fn main() {}
 

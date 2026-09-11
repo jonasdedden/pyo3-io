@@ -2,7 +2,7 @@
 
 use pyo3::prelude::*;
 use pyo3::types::PyModule;
-use pyo3_file_typed::{BinaryWrite, TextWrite};
+use pyo3_typed_io::{BinaryWrite, TextWrite};
 use std::ffi::CString;
 use std::io::{ErrorKind, Write};
 

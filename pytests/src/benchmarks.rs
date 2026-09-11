@@ -2,7 +2,7 @@
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
-use pyo3_file_typed::{BinaryRead, BinaryWrite, TextRead};
+use pyo3_typed_io::{BinaryRead, BinaryWrite, TextRead};
 use std::io::{Read, Write};
 
 fn unknown(implementation: &str) -> PyErr {

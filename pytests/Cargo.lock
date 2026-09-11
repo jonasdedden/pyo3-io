@@ -78,15 +78,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "pyo3-file-typed"
-version = "0.1.0"
-dependencies = [
- "libc",
- "pyo3",
- "thiserror",
-]
-
-[[package]]
 name = "pyo3-filelike"
 version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -120,13 +111,22 @@ dependencies = [
 ]
 
 [[package]]
-name = "pyo3_file_typed_tests"
+name = "pyo3-typed-io"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "pyo3",
+ "thiserror",
+]
+
+[[package]]
+name = "pyo3_typed_io_tests"
 version = "0.1.0"
 dependencies = [
  "pyo3",
  "pyo3-file",
- "pyo3-file-typed",
  "pyo3-filelike",
+ "pyo3-typed-io",
 ]
 
 [[package]]

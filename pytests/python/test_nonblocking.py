@@ -21,7 +21,7 @@ import os
 
 import pytest
 
-import pyo3_file_typed_tests as ext
+import pyo3_typed_io_tests as ext
 
 
 class NoneThenData:

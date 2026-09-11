@@ -1,5 +1,5 @@
 //! `std::io::Write` takes bytes, which a text object does not accept.
-use pyo3_file_typed::TextWrite;
+use pyo3_typed_io::TextWrite;
 use std::io::Write;
 
 fn main() {}

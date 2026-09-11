@@ -1,4 +1,4 @@
-# pyo3-file-typed
+# pyo3-typed-io
 
 Python file-like objects with **payload kind** and **required capabilities** in their Rust type.
 Binary streams implement the appropriate `std::io` traits; text streams have a
@@ -24,14 +24,14 @@ because rustdoc does not automatically copy implementations onto type aliases.
 ```toml
 [dependencies]
 pyo3 = "0.29.2"
-pyo3-file-typed = "0.1.0"
+pyo3-typed-io = "0.1.0"
 ```
 
 Use named aliases directly as PyO3 arguments; they implement `FromPyObject`.
 
 ```rust,no_run
 use pyo3::prelude::*;
-use pyo3_file_typed::{BinaryRead, TextReadSeek};
+use pyo3_typed_io::{BinaryRead, TextReadSeek};
 use std::io::Read;
 
 #[pyfunction]
@@ -191,7 +191,7 @@ or all dynamic attribute behavior, so static and runtime acceptance need not coi
 The comparison fixtures use published `pyo3-file` **0.17.0** and
 `pyo3-filelike` **0.5.3**:
 
-| Design | `pyo3-file` | `pyo3-filelike` | `pyo3-file-typed` |
+| Design | `pyo3-file` | `pyo3-filelike` | `pyo3-typed-io` |
 |---|---|---|---|
 | Payload model | One runtime-adapting wrapper | Separate binary/text wrappers | Separate binary/text types |
 | Construction | Runtime capability options; also implements `FromPyObject` | Explicit constructors, mode-based classification | Typed requirements; hierarchy rejection and callable checks |
