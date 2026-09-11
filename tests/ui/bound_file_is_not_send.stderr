@@ -13,7 +13,7 @@ note: required because it appears within the type `PhantomData<*mut pyo3::marker
   | pub struct PhantomData<T: PointeeSized>;
   |            ^^^^^^^^^^^
 note: required because it appears within the type `pyo3::marker::NotSend`
- --> $PYO3/src/marker.rs
+ --> $CARGO/pyo3-$VERSION/src/marker.rs
   |
   | struct NotSend(PhantomData<*mut Python<'static>>);
   |        ^^^^^^^
@@ -23,12 +23,12 @@ note: required because it appears within the type `PhantomData<pyo3::marker::Not
   | pub struct PhantomData<T: PointeeSized>;
   |            ^^^^^^^^^^^
 note: required because it appears within the type `pyo3::marker::Python<'_>`
- --> $PYO3/src/marker.rs
+ --> $CARGO/pyo3-$VERSION/src/marker.rs
   |
   | pub struct Python<'py>(PhantomData<&'py AttachGuard>, PhantomData<NotSend>);
   |            ^^^^^^
 note: required because it appears within the type `pyo3::instance::Bound<'_, pyo3::types::any::PyAny>`
- --> $PYO3/src/instance.rs
+ --> $CARGO/pyo3-$VERSION/src/instance.rs
   |
   | pub struct Bound<'py, T>(Python<'py>, ManuallyDrop<Py<T>>);
   |            ^^^^^
