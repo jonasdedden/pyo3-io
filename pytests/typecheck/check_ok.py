@@ -1,7 +1,7 @@
 """Everything here must type-check.
 
-Nothing inherits from anything: the protocols are structural, so having the right methods with
-the right payload type is the whole requirement.
+The protocols are structural contracts: matching method signatures is sufficient
+for static acceptance, not a guarantee that runtime I/O succeeds.
 """
 
 import io
@@ -21,6 +21,13 @@ ext.binary_read_write(io.BytesIO(), b"abc")
 
 with open("/tmp/rw.bin", "w+b") as both:
     ext.binary_everything(both, b"abc")
+
+# FileIO signatures permit None for nonblocking reads and writes.
+with io.FileIO("/tmp/raw.bin", "w+") as raw:
+    ext.binary_read_all(raw)
+    ext.binary_write(raw, b"abc")
+    ext.binary_read_write(raw, b"abc")
+    ext.binary_everything(raw, b"abc")
 
 # ---- real io objects, text
 with open("/etc/hostname") as text:
@@ -101,3 +108,28 @@ class Everything:
 ext.binary_read_all(Everything())
 ext.binary_fileno(Everything())
 ext.binary_everything(Everything(), b"x")
+
+
+# ---- nonblocking custom streams, with no optional flush method
+class NonblockingBinary:
+    def read(self, size: int, /) -> bytearray | None:
+        return None
+
+    def write(self, data: bytes, /) -> int | None:
+        return None
+
+
+class NonblockingText:
+    def read(self, size: int, /) -> str | None:
+        return None
+
+    def write(self, data: str, /) -> int | None:
+        return None
+
+
+ext.binary_read_all(NonblockingBinary())
+ext.binary_write(NonblockingBinary(), b"x")
+ext.binary_read_write(NonblockingBinary(), b"x")
+ext.text_read_all(NonblockingText())
+ext.text_write(NonblockingText(), "x")
+ext.text_read_write(NonblockingText(), "x")

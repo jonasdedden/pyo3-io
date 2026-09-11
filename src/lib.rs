@@ -60,7 +60,8 @@ pub type BoundPyTextFile<
     const FILENO: bool,
 > = BoundFile<'py, Text, READ, WRITE, SEEK, FILENO>;
 
-include!(concat!(env!("OUT_DIR"), "/aliases.rs"));
+mod aliases;
+pub use aliases::*;
 
 /// The shared implementation behind [`PyBinaryFile`] and [`PyTextFile`].
 ///

@@ -1,4 +1,4 @@
-//! Generates the capability type aliases and the type stub protocols.
+//! Generates type stub protocols only when experimental inspection is enabled.
 //!
 //! There are two payload kinds and fifteen non-empty capability sets, so thirty of each. Every
 //! protocol is a PyO3 introspection chunk needing its own statically named symbol, which is far
@@ -28,15 +28,6 @@ impl Combination {
     fn protocol(&self) -> String {
         format!(
             "Supports{}{}",
-            if self.text { "Text" } else { "Binary" },
-            self.suffix
-        )
-    }
-
-    /// e.g. `BinaryReadFileno`
-    fn alias(&self) -> String {
-        format!(
-            "{}{}",
             if self.text { "Text" } else { "Binary" },
             self.suffix
         )
@@ -116,6 +107,13 @@ fn readable_buffer() -> String {
         .to_string()
 }
 
+/// Nonblocking reads and writes may report that they would block with `None`.
+fn or_none(annotation: String) -> String {
+    format!(
+        r#"{{"type":"binop","left":{annotation},"op":"bitor","right":{{"type":"constant","kind":"none"}}}}"#
+    )
+}
+
 /// The JSON of one protocol method, as a function chunk parented to the protocol.
 ///
 /// Everything goes through `call_method0`/`call_method1`, so every argument is positional only.
@@ -126,23 +124,20 @@ fn method(method: &str, protocol: &str, payload: &str) -> String {
                 r#"[{{"name":"self"}},{{"name":"size","annotation":{}}}]"#,
                 builtin("int")
             ),
-            if payload == "str" {
+            or_none(if payload == "str" {
                 builtin("str")
             } else {
                 readable_buffer()
-            },
+            }),
         ),
-        // The result is extracted as the amount written, so unlike `_typeshed.SupportsWrite` this
-        // really does need an `int` back
+        // Successful writes return a count; `None` means the operation would block.
         "write" => (
             format!(
                 r#"[{{"name":"self"}},{{"name":"data","annotation":{}}}]"#,
                 builtin(payload)
             ),
-            builtin("int"),
+            or_none(builtin("int")),
         ),
-        // The result is discarded, like `_typeshed.SupportsFlush`
-        "flush" => (r#"[{"name":"self"}]"#.to_string(), builtin("object")),
         "seek" => (
             format!(
                 r#"[{{"name":"self"}},{{"name":"offset","annotation":{int}}},{{"name":"whence","annotation":{int}}}]"#,
@@ -191,41 +186,12 @@ fn emit_chunk(out: &mut String, symbol: &str, json: &str) {
 
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
+    println!("cargo:rerun-if-env-changed=CARGO_FEATURE_EXPERIMENTAL_INSPECT");
+    if env::var_os("CARGO_FEATURE_EXPERIMENTAL_INSPECT").is_none() {
+        return;
+    }
     let out_dir = Path::new(&env::var("OUT_DIR").unwrap()).to_path_buf();
     let combinations = combinations();
-
-    let mut aliases = String::new();
-    for combination in &combinations {
-        let alias = combination.alias();
-        let (mode, kind) = if combination.text {
-            ("Text", "text")
-        } else {
-            ("Binary", "binary")
-        };
-        let capabilities = CAPABILITIES
-            .iter()
-            .map(|(name, flag)| {
-                if combination.has(*flag) {
-                    format!("`{}`", name.to_lowercase())
-                } else {
-                    String::new()
-                }
-            })
-            .filter(|entry| !entry.is_empty())
-            .collect::<Vec<_>>()
-            .join(", ");
-        let [read, write, seek, fileno] =
-            CAPABILITIES.map(|(_, flag)| combination.has(flag).to_string());
-        writeln!(
-            aliases,
-            "/// A {kind} object supporting {capabilities}.\n\
-             pub type {alias} = Py{mode}File<{read}, {write}, {seek}, {fileno}>;\n\
-             /// A [`{alias}`] with the GIL held. See [`BoundFile`].\n\
-             pub type Bound{alias}<'py> = BoundPy{mode}File<'py, {read}, {write}, {seek}, {fileno}>;"
-        )
-        .unwrap();
-    }
-    fs::write(out_dir.join("aliases.rs"), aliases).unwrap();
 
     let mut protocols = String::new();
     let mut arms = String::new();

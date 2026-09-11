@@ -3,10 +3,9 @@
 //! Every payload kind and capability set gets a `typing.Protocol` naming exactly the methods the
 //! Rust side will call on the object, and `FromPyObject::INPUT_TYPE` points at the matching one.
 //!
-//! These are plain structural protocols, and they are exact: because the payload kind is fixed by
-//! the Rust type there is no `isinstance` dispatch happening at runtime for them to disagree with.
-//! A duck-typed object with the right methods is accepted by the type checker and by the runtime
-//! alike.
+//! These are structural contracts, not proofs of runtime behavior. An annotation cannot guarantee
+//! that a method returns a valid count, that a buffer has a supported layout, or that I/O succeeds.
+//! Nonblocking reads and writes may return `None`; the adapter reports that as `WouldBlock`.
 //!
 //! The protocols are emitted as PyO3 introspection chunks, i.e. `#[used] #[no_mangle]` statics
 //! holding length-prefixed JSON, which is the format `#[pyclass]` emits too. They are declared

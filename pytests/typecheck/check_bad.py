@@ -9,12 +9,12 @@ import pyo3_file_typed_tests as ext
 
 
 class ReadsText:
-    def read(self, size: int, /) -> str:
+    def read(self, size: int, /) -> str | None:
         return ""
 
 
 class ReadsBytes:
-    def read(self, size: int, /) -> bytes:
+    def read(self, size: int, /) -> bytes | None:
         return b""
 
 

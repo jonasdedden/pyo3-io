@@ -51,10 +51,33 @@ class TestStubContent:
             assert f"class {unused}(" not in stub_source
 
     def test_binary_and_text_payloads_are_distinct(self, stub_source):
-        assert "def read(self, size: int, /) -> ReadableBuffer: ..." in stub_source
-        assert "def read(self, size: int, /) -> str: ..." in stub_source
-        assert "def write(self, data: bytes, /) -> int: ..." in stub_source
-        assert "def write(self, data: str, /) -> int: ..." in stub_source
+        assert "def read(self, size: int, /) -> ReadableBuffer | None: ..." in stub_source
+        assert "def read(self, size: int, /) -> str | None: ..." in stub_source
+        assert "def write(self, data: bytes, /) -> int | None: ..." in stub_source
+        assert "def write(self, data: str, /) -> int | None: ..." in stub_source
+
+    def test_protocols_require_exactly_the_named_capabilities(self, stub_source):
+        """Structural contracts require methods, not successful runtime behavior."""
+        import ast
+
+        for node in ast.parse(stub_source).body:
+            if not isinstance(node, ast.ClassDef) or not node.name.startswith("Supports"):
+                continue
+            expected = {
+                method.lower()
+                for method in ("Read", "Write", "Seek", "Fileno")
+                if method in node.name
+            }
+            if "Text" in node.name and "Seek" in node.name:
+                expected.add("tell")
+            methods = [member for member in node.body if isinstance(member, ast.FunctionDef)]
+            assert {method.name for method in methods} == expected
+            for method in methods:
+                if method.name in ("read", "write"):
+                    assert isinstance(method.returns, ast.BinOp)
+                    assert isinstance(method.returns.op, ast.BitOr)
+                    assert isinstance(method.returns.right, ast.Constant)
+                    assert method.returns.right.value is None
 
     def test_writing_protocols_do_not_require_flush(self, stub_source):
         """`flush` is called only when the object has one, so demanding it in the protocol would
