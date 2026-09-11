@@ -1,21 +1,149 @@
-//! Named capability combinations, available without introspection or generated files.
+//! Complete catalog of owned file aliases.
+//!
+//! Start with [`BinaryRead`], [`BinaryWrite`], [`BinaryReadSeek`], [`TextRead`],
+//! [`TextWrite`] or [`TextReadSeek`]. Add `Write`, `Seek` or `Fileno` when the consumer
+//! needs those capabilities. Names follow the order `Read`, `Write`, `Seek`, `Fileno`.
+//!
+//! Each alias lists its available operations and links to their family reference.
+//! Already-attached forms are in [`bound`]; most callers obtain them with
+//! [`bind`](crate::PyFile::bind) or [`into_bound`](crate::PyFile::into_bound)
+//! without naming a bound type. All aliases remain importable from the crate root.
 
 use crate::file_types::{file_types, has_capability};
+
+// Explicit fragments keep links on the family reference: rustdoc's Type::method resolution
+// otherwise follows a type alias to the shared PyFile/BoundFile page.
+macro_rules! method_link {
+    ($family:expr, $method:ident) => {
+        concat!(
+            "[`",
+            stringify!($method),
+            "`](crate::",
+            $family,
+            "#method.",
+            stringify!($method),
+            ")"
+        )
+    };
+}
+
+macro_rules! operation_doc {
+    (Binary, $family:expr, $common:ident, read) => {
+        concat!(
+            "- **Reading:** implements [`Read`](std::io::Read): ",
+            method_link!($family, read),
+            ", ",
+            method_link!($family, read_exact),
+            ", ",
+            method_link!($family, read_to_end),
+            ", ",
+            method_link!($family, read_to_string),
+            ", and the other `Read` methods. Import `std::io::Read` to call them.\n"
+        )
+    };
+    (Binary, $family:expr, $common:ident, write) => {
+        concat!(
+            "- **Writing:** implements [`Write`](std::io::Write): ",
+            method_link!($family, write),
+            ", ",
+            method_link!($family, write_all),
+            ", ",
+            method_link!($family, flush),
+            ". Import `std::io::Write` to call them.\n"
+        )
+    };
+    (Binary, $family:expr, $common:ident, seek) => {
+        concat!(
+            "- **Seeking:** implements [`Seek`](std::io::Seek): ",
+            method_link!($family, seek),
+            ", ",
+            method_link!($family, rewind),
+            ", ",
+            method_link!($family, stream_position),
+            ". Import `std::io::Seek` to call them.\n"
+        )
+    };
+    (Text, $family:expr, $common:ident, read) => {
+        concat!(
+            "- **Reading characters:** ",
+            method_link!($family, read_chars),
+            ", ",
+            method_link!($family, read_to_string),
+            ". This does not implement `std::io::Read`.\n"
+        )
+    };
+    (Text, $family:expr, $common:ident, write) => {
+        concat!(
+            "- **Writing characters:** ",
+            method_link!($family, write_str),
+            ", ",
+            method_link!($family, write_all_str),
+            ", ",
+            method_link!($family, flush),
+            ". This does not implement `std::io::Write`.\n"
+        )
+    };
+    (Text, $family:expr, $common:ident, seek) => {
+        concat!(
+            "- **Opaque-cookie seeking:** ",
+            method_link!($family, tell),
+            ", ",
+            method_link!($family, seek_to),
+            ", ",
+            method_link!($family, rewind),
+            ", ",
+            method_link!($family, seek_to_end),
+            ". This does not implement `std::io::Seek`.\n"
+        )
+    };
+    ($mode:ident, $family:expr, $common:ident, fileno) => {
+        concat!(
+            "- **Descriptor number:** ",
+            method_link!(stringify!($common), fileno),
+            ".\n"
+        )
+    };
+}
+
+#[cfg(unix)]
+macro_rules! unix_operation_doc {
+    ($common:ident, fileno) => {
+        concat!(
+            "- **Owned Unix descriptor:** ",
+            method_link!(stringify!($common), try_clone_fd),
+            " returns an independent `OwnedFd`. The `AsRawFd` compatibility trait may panic; ",
+            "there is deliberately no `AsFd` borrow of the Python object's descriptor.\n"
+        )
+    };
+    ($common:ident, $other:ident) => {
+        ""
+    };
+}
 
 macro_rules! define_aliases {
     ($($alias:ident, $bound:ident: $mode:ident [$($capability:ident),+];)*) => {
         $(
-            #[doc = concat!("A [`crate::Py", stringify!($mode), "File`] requiring `", stringify!($($capability),*), "`.")]
+            #[doc = concat!("An owned `", stringify!($mode), "` stream requiring `", stringify!($($capability),*), "`.")]
+            #[doc = "\n# Available operations\n\n\
+                - **Construction:** [`new`](crate::PyFile::new), [`py_new`](crate::PyFile::py_new), \
+                  [`py_new_unchecked`](crate::PyFile::py_new_unchecked).\n\
+                - **Binding:** [`bind`](crate::PyFile::bind), [`into_bound`](crate::PyFile::into_bound).\n\
+                - **Object access:** [`as_py_object`](crate::PyFile::as_py_object), \
+                  [`into_py_object`](crate::PyFile::into_py_object).\n\
+                - **Common traits:** [`Clone`], [`Debug`](std::fmt::Debug), \
+                  [`FromPyObject`](pyo3::FromPyObject).\n"]
+            $(
+                #[doc = operation_doc!($mode, concat!("Py", stringify!($mode), "File"), PyFile, $capability)]
+                #[cfg_attr(unix, doc = unix_operation_doc!(PyFile, $capability))]
+            )*
+            #[doc = concat!("\n# API reference\n\n\
+                Rustdoc does not copy implementations onto convenience aliases. See \
+                [`Py", stringify!($mode), "File`](crate::Py", stringify!($mode), "File) for I/O methods \
+                and [`PyFile`](crate::PyFile) for shared operations. Only the capabilities listed \
+                above are available on this alias.\n\nThe attached counterpart is [`",
+                stringify!($bound), "`](crate::aliases::bound::", stringify!($bound),
+                "). See the [quickstart](crate#quickstart) for usage examples.")]
             pub type $alias = crate::PyFile<
-                crate::$mode,
-                { has_capability!(read; $($capability),*) },
-                { has_capability!(write; $($capability),*) },
-                { has_capability!(seek; $($capability),*) },
-                { has_capability!(fileno; $($capability),*) },
-            >;
-            #[doc = concat!("A [`", stringify!($alias), "`] with an attached Python token. See [`crate::BoundFile`].")]
-            pub type $bound<'py> = crate::BoundFile<
-                'py,
                 crate::$mode,
                 { has_capability!(read; $($capability),*) },
                 { has_capability!(write; $($capability),*) },
@@ -27,3 +155,47 @@ macro_rules! define_aliases {
 }
 
 file_types!(define_aliases);
+
+/// Complete catalog of aliases tied to an attached Python token.
+///
+/// Prefer constructing an [owned alias](super) and calling
+/// [`bind`](crate::PyFile::bind) or [`into_bound`](crate::PyFile::into_bound).
+/// These names are mainly useful when writing explicit lifetime-bearing signatures.
+/// They remain importable from the crate root for compatibility.
+pub mod bound {
+    use crate::file_types::{file_types, has_capability};
+
+    macro_rules! define_bound_aliases {
+        ($($alias:ident, $bound:ident: $mode:ident [$($capability:ident),+];)*) => {
+            $(
+                #[doc = concat!("An attached `", stringify!($mode), "` stream requiring `", stringify!($($capability),*), "`.")]
+                #[doc = concat!("\nObtained from [`", stringify!($alias), "`](crate::aliases::",
+                    stringify!($alias), ") with [`bind`](crate::PyFile::bind) or \
+                    [`into_bound`](crate::PyFile::into_bound); it cannot outlive its Python token.\n")]
+                #[doc = "\n# Available operations\n\n\
+                    - **Object access:** [`as_py_object`](crate::BoundFile::as_py_object).\n\
+                    - **Release the token:** [`unbind`](crate::BoundFile::unbind) returns the owned form.\n\
+                    - **Common traits:** [`Clone`], [`Debug`](std::fmt::Debug).\n"]
+                $(
+                    #[doc = operation_doc!($mode, concat!("BoundPy", stringify!($mode), "File"), BoundFile, $capability)]
+                    #[cfg_attr(unix, doc = unix_operation_doc!(BoundFile, $capability))]
+                )*
+                #[doc = concat!("\n# API reference\n\n\
+                    Rustdoc does not copy implementations onto convenience aliases. See \
+                    [`BoundPy", stringify!($mode), "File`](crate::BoundPy", stringify!($mode), "File) \
+                    for I/O methods and [`BoundFile`](crate::BoundFile) for shared operations. \
+                    Only the capabilities listed above are available on this alias.")]
+                pub type $bound<'py> = crate::BoundFile<
+                    'py,
+                    crate::$mode,
+                    { has_capability!(read; $($capability),*) },
+                    { has_capability!(write; $($capability),*) },
+                    { has_capability!(seek; $($capability),*) },
+                    { has_capability!(fileno; $($capability),*) },
+                >;
+            )*
+        };
+    }
+
+    file_types!(define_bound_aliases);
+}

@@ -1,11 +1,11 @@
-//! The `str`-shaped API of [`PyFile<Text, ..>`].
+//! The `str`-shaped API of [`PyTextFile`] and [`BoundPyTextFile`].
 //!
 //! Python counts a text stream's `read(size)` in characters, so there is no byte count for
 //! [`std::io::Read`] to honour and this deliberately does not implement it. Characters cross the
 //! boundary as Python Unicode and Rust UTF-8 strings; no assumption is made about the stream's
 //! underlying encoding.
 
-use crate::{BoundFile, Error, PyFile, Text};
+use crate::{BoundPyTextFile, Error, PyTextFile, Text};
 use pyo3::intern;
 use pyo3::prelude::*;
 use pyo3::types::PyInt;
@@ -32,7 +32,7 @@ impl TextPosition {
 }
 
 impl<const WRITE: bool, const SEEK: bool, const FILENO: bool>
-    BoundFile<'_, Text, true, WRITE, SEEK, FILENO>
+    BoundPyTextFile<'_, true, WRITE, SEEK, FILENO>
 {
     /// Reads at most `count` **characters**, the unit Python's text `read` counts in.
     ///
@@ -82,7 +82,7 @@ impl<const WRITE: bool, const SEEK: bool, const FILENO: bool>
 }
 
 impl<const READ: bool, const SEEK: bool, const FILENO: bool>
-    BoundFile<'_, Text, READ, true, SEEK, FILENO>
+    BoundPyTextFile<'_, READ, true, SEEK, FILENO>
 {
     /// Writes `text`, returning the number of **characters** written.
     ///
@@ -147,7 +147,7 @@ impl<const READ: bool, const SEEK: bool, const FILENO: bool>
 /// arbitrary [`SeekFrom::Start`](std::io::SeekFrom::Start) have no meaning, and Python raises if
 /// you try.
 impl<const READ: bool, const WRITE: bool, const FILENO: bool>
-    BoundFile<'_, Text, READ, WRITE, true, FILENO>
+    BoundPyTextFile<'_, READ, WRITE, true, FILENO>
 {
     /// The current position, as an opaque cookie for [`seek_to`](Self::seek_to).
     ///
@@ -194,58 +194,56 @@ impl<const READ: bool, const WRITE: bool, const FILENO: bool>
 // One attach for the whole operation, then the bound implementation above.
 
 impl<const WRITE: bool, const SEEK: bool, const FILENO: bool>
-    PyFile<Text, true, WRITE, SEEK, FILENO>
+    PyTextFile<true, WRITE, SEEK, FILENO>
 {
-    /// See [`BoundFile::read_chars`].
+    /// See [`BoundPyTextFile::read_chars`](crate::BoundPyTextFile#method.read_chars).
     pub fn read_chars(&mut self, count: usize) -> io::Result<String> {
         Python::attach(|py| self.bind(py).read_chars(count))
     }
 
-    /// See [`BoundFile::read_to_string`].
+    /// See [`BoundPyTextFile::read_to_string`](crate::BoundPyTextFile#method.read_to_string).
     pub fn read_to_string(&mut self) -> io::Result<String> {
         Python::attach(|py| self.bind(py).read_to_string())
     }
 }
 
-impl<const READ: bool, const SEEK: bool, const FILENO: bool>
-    PyFile<Text, READ, true, SEEK, FILENO>
-{
-    /// See [`BoundFile::write_str`].
+impl<const READ: bool, const SEEK: bool, const FILENO: bool> PyTextFile<READ, true, SEEK, FILENO> {
+    /// See [`BoundPyTextFile::write_str`](crate::BoundPyTextFile#method.write_str).
     pub fn write_str(&mut self, text: &str) -> io::Result<usize> {
         Python::attach(|py| self.bind(py).write_str(text))
     }
 
-    /// See [`BoundFile::write_all_str`].
+    /// See [`BoundPyTextFile::write_all_str`](crate::BoundPyTextFile#method.write_all_str).
     pub fn write_all_str(&mut self, text: &str) -> io::Result<()> {
         // One attach for the whole retry loop rather than one per short write.
         Python::attach(|py| self.bind(py).write_all_str(text))
     }
 
-    /// See [`BoundFile::flush`].
+    /// See [`BoundPyTextFile::flush`](crate::BoundPyTextFile#method.flush).
     pub fn flush(&mut self) -> io::Result<()> {
         Python::attach(|py| self.bind(py).flush())
     }
 }
 
 impl<const READ: bool, const WRITE: bool, const FILENO: bool>
-    PyFile<Text, READ, WRITE, true, FILENO>
+    PyTextFile<READ, WRITE, true, FILENO>
 {
-    /// See [`BoundFile::tell`].
+    /// See [`BoundPyTextFile::tell`](crate::BoundPyTextFile#method.tell).
     pub fn tell(&mut self) -> io::Result<TextPosition> {
         Python::attach(|py| self.bind(py).tell())
     }
 
-    /// See [`BoundFile::seek_to`].
+    /// See [`BoundPyTextFile::seek_to`](crate::BoundPyTextFile#method.seek_to).
     pub fn seek_to(&mut self, cookie: &TextPosition) -> io::Result<TextPosition> {
         Python::attach(|py| self.bind(py).seek_to(cookie))
     }
 
-    /// See [`BoundFile::rewind`].
+    /// See [`BoundPyTextFile::rewind`](crate::BoundPyTextFile#method.rewind).
     pub fn rewind(&mut self) -> io::Result<TextPosition> {
         Python::attach(|py| self.bind(py).rewind())
     }
 
-    /// See [`BoundFile::seek_to_end`].
+    /// See [`BoundPyTextFile::seek_to_end`](crate::BoundPyTextFile#method.seek_to_end).
     pub fn seek_to_end(&mut self) -> io::Result<TextPosition> {
         Python::attach(|py| self.bind(py).seek_to_end())
     }

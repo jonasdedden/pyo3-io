@@ -4,18 +4,18 @@
 //! bytes and `write` hands it `bytes`, so the counts mean the same thing on both sides and nothing
 //! is decoded on the way through.
 //!
-//! The work lives on [`BoundFile`], which already has a token. [`PyFile`] implements the same
-//! traits by attaching once and delegating, so a caller who has the GIL can avoid that and a
-//! caller who does not — a thread of its own, say — still works.
+//! The work lives on [`BoundPyBinaryFile`], which already has a token. [`PyBinaryFile`] implements
+//! the same traits by attaching once and delegating, so a caller who has the GIL can avoid that
+//! and a caller who does not — a thread of its own, say — still works.
 
-use crate::{Binary, BoundFile, Error, PyFile};
+use crate::{Binary, BoundPyBinaryFile, Error, PyBinaryFile};
 use pyo3::intern;
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyMemoryView};
 use std::io::{self, Read, Seek, SeekFrom, Write};
 
 impl<const WRITE: bool, const SEEK: bool, const FILENO: bool> Read
-    for BoundFile<'_, Binary, true, WRITE, SEEK, FILENO>
+    for BoundPyBinaryFile<'_, true, WRITE, SEEK, FILENO>
 {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         if buf.is_empty() {
@@ -59,7 +59,7 @@ impl<const WRITE: bool, const SEEK: bool, const FILENO: bool> Read
 }
 
 impl<const READ: bool, const SEEK: bool, const FILENO: bool> Write
-    for BoundFile<'_, Binary, READ, true, SEEK, FILENO>
+    for BoundPyBinaryFile<'_, READ, true, SEEK, FILENO>
 {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         let obj = self.as_py_object();
@@ -92,7 +92,7 @@ impl<const READ: bool, const SEEK: bool, const FILENO: bool> Write
 }
 
 impl<const READ: bool, const WRITE: bool, const FILENO: bool> Seek
-    for BoundFile<'_, Binary, READ, WRITE, true, FILENO>
+    for BoundPyBinaryFile<'_, READ, WRITE, true, FILENO>
 {
     fn seek(&mut self, pos: SeekFrom) -> io::Result<u64> {
         let (offset, whence) = match pos {
@@ -120,7 +120,7 @@ impl<const READ: bool, const WRITE: bool, const FILENO: bool> Seek
 // One attach for the whole operation, then the bound implementation above.
 
 impl<const WRITE: bool, const SEEK: bool, const FILENO: bool> Read
-    for PyFile<Binary, true, WRITE, SEEK, FILENO>
+    for PyBinaryFile<true, WRITE, SEEK, FILENO>
 {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         Python::attach(|py| self.bind(py).read(buf))
@@ -140,7 +140,7 @@ impl<const WRITE: bool, const SEEK: bool, const FILENO: bool> Read
 }
 
 impl<const READ: bool, const SEEK: bool, const FILENO: bool> Write
-    for PyFile<Binary, READ, true, SEEK, FILENO>
+    for PyBinaryFile<READ, true, SEEK, FILENO>
 {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         Python::attach(|py| self.bind(py).write(buf))
@@ -157,7 +157,7 @@ impl<const READ: bool, const SEEK: bool, const FILENO: bool> Write
 }
 
 impl<const READ: bool, const WRITE: bool, const FILENO: bool> Seek
-    for PyFile<Binary, READ, WRITE, true, FILENO>
+    for PyBinaryFile<READ, WRITE, true, FILENO>
 {
     fn seek(&mut self, pos: SeekFrom) -> io::Result<u64> {
         Python::attach(|py| self.bind(py).seek(pos))

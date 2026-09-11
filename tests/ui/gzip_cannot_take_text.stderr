@@ -1,17 +1,17 @@
-error[E0277]: the trait bound `pyo3_file_typed::PyFile<Text, true, false, false, false>: std::io::Read` is not satisfied
+error[E0277]: the trait bound `PyFile<Text, true, false, false, false>: std::io::Read` is not satisfied
   --> tests/ui/gzip_cannot_take_text.rs:10:16
    |
 10 |     decompress(file);
-   |     ---------- ^^^^ the trait `std::io::Read` is not implemented for `pyo3_file_typed::PyFile<Text, true, false, false, false>`
+   |     ---------- ^^^^ the trait `std::io::Read` is not implemented for `PyFile<Text, true, false, false, false>`
    |     |
    |     required by a bound introduced by this call
    |
-help: the trait `std::io::Read` is implemented for `pyo3_file_typed::PyFile<pyo3_file_typed::Binary, true, WRITE, SEEK, FILENO>`
+help: the trait `std::io::Read` is implemented for `PyFile<pyo3_file_typed::Binary, true, WRITE, SEEK, FILENO>`
   --> src/binary.rs
    |
    | / impl<const WRITE: bool, const SEEK: bool, const FILENO: bool> Read
-   | |     for PyFile<Binary, true, WRITE, SEEK, FILENO>
-   | |_________________________________________________^
+   | |     for PyBinaryFile<true, WRITE, SEEK, FILENO>
+   | |_______________________________________________^
 note: required by a bound in `decompress`
   --> tests/ui/gzip_cannot_take_text.rs:7:29
    |

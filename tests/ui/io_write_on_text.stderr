@@ -1,4 +1,4 @@
-error[E0599]: the method `write` exists for mutable reference `&mut pyo3_file_typed::PyFile<Text, false, true, false, false>`, but its trait bounds were not satisfied
+error[E0599]: the method `write` exists for mutable reference `&mut PyFile<Text, false, true, false, false>`, but its trait bounds were not satisfied
  --> tests/ui/io_write_on_text.rs:8:18
   |
 8 |     let _ = file.write(b"bytes");
@@ -10,5 +10,5 @@ error[E0599]: the method `write` exists for mutable reference `&mut pyo3_file_ty
   | ----------------------------------------------------------------------------------------------- doesn't satisfy `_: Write`
   |
   = note: the following trait bounds were not satisfied:
-          `pyo3_file_typed::PyFile<Text, false, true, false, false>: std::io::Write`
-          which is required by `&mut pyo3_file_typed::PyFile<Text, false, true, false, false>: std::io::Write`
+          `PyFile<Text, false, true, false, false>: std::io::Write`
+          which is required by `&mut PyFile<Text, false, true, false, false>: std::io::Write`

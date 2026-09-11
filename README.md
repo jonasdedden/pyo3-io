@@ -4,6 +4,21 @@ Python file-like objects with **payload kind** and **required capabilities** in 
 Binary streams implement the appropriate `std::io` traits; text streams have a
 character-counted API and opaque seek positions.
 
+## API guide
+
+| Task | Start with | Method reference |
+|---|---|---|
+| Read or write bytes | [`BinaryRead`], [`BinaryWrite`] | [`PyBinaryFile`] |
+| Read or write text | [`TextRead`], [`TextWrite`] | [`PyTextFile`] |
+| Read and seek | [`BinaryReadSeek`], [`TextReadSeek`] | The corresponding binary/text reference |
+| Construct, bind, or access the Python object | Any owned alias | [`PyFile`] |
+| Work while already attached to Python | Obtain a bound form with `bind` or `into_bound` | [`BoundPyBinaryFile`], [`BoundPyTextFile`] |
+
+The complete owned catalog is in [`aliases`]; explicit lifetime-bearing names are
+in [`aliases::bound`]. All existing root imports still work. Each convenience
+alias page lists **Available operations** and links to the relevant method reference,
+because rustdoc does not automatically copy implementations onto type aliases.
+
 ## Quickstart
 
 ```toml
@@ -53,6 +68,13 @@ All 30 nonempty combinations, plus their `Bound…<'py>` forms, are defined in t
 shared `src/file_types.rs` macro table and available without optional features.
 The underlying types are `PyBinaryFile<READ, WRITE, SEEK, FILENO>` and
 `PyTextFile<READ, WRITE, SEEK, FILENO>`.
+
+The rustdoc front page shows six common starting aliases plus the four family
+references. The complete owned catalog lives in `aliases`, with attached forms in
+`aliases::bound`; all root imports still work. Each convenience alias lists its
+**Available operations** with links to the relevant methods, because rustdoc does
+not copy implementations onto type aliases. `python3 pytests/check_rustdoc.py`
+checks the rendered pages and their links.
 
 Only requested operations are exposed in Rust. `BinaryRead` does not implement
 `Write`, and no text wrapper implements `std::io::Read`, `Write`, or `Seek`.
@@ -194,11 +216,13 @@ Run from the repository root with Rust, Python, and `uv` available:
 
 ```sh
 cargo test --doc
+python3 pytests/check_rustdoc.py
 ./pytests/run-tests.sh
 ```
 
 The runner defaults to standard Rust and Python validation, without a custom stub
-generator. Opt in to stub generation/type checking or benchmarks:
+generator, and checks freshly rendered rustdoc pages and their links.
+Opt in to stub generation/type checking or benchmarks:
 
 ```sh
 PYO3_INTROSPECTION=/path/to/pyo3-introspection ./pytests/run-tests.sh --stubs

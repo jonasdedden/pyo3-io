@@ -1,8 +1,8 @@
-error[E0277]: the trait bound `pyo3_file_typed::PyFile<pyo3_file_typed::Binary, false, false, false, true>: AsFd` is not satisfied
+error[E0277]: the trait bound `PyFile<pyo3_file_typed::Binary, false, false, false, true>: AsFd` is not satisfied
  --> tests/ui/as_fd_with_capability.rs:7:17
   |
 7 |     assert_fd::<BinaryFileno>();
-  |                 ^^^^^^^^^^^^ the trait `AsFd` is not implemented for `pyo3_file_typed::PyFile<pyo3_file_typed::Binary, false, false, false, true>`
+  |                 ^^^^^^^^^^^^ the trait `AsFd` is not implemented for `PyFile<pyo3_file_typed::Binary, false, false, false, true>`
   |
   = help: the following other types implement trait `AsFd`:
             &T

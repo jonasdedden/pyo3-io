@@ -38,6 +38,9 @@ step "cargo test: default and all features"
 cargo test --manifest-path "$crate/Cargo.toml"
 cargo test --manifest-path "$crate/Cargo.toml" --all-features
 
+step "rustdoc: rendered API surface and links"
+python3 "$here/check_rustdoc.py"
+
 step "build the release test extension"
 artifact="$(python3 "$here/python/_extension.py" --profile release)"
 

@@ -35,6 +35,20 @@ mod sealed {
 /// Only the capabilities that were asked for exist on the value, so a read-only file cannot be
 /// written to, and it can never be confused with a [`PyTextFile`]. Both are compile errors rather
 /// than runtime ones.
+///
+/// # API guide
+///
+/// The trait implementations below are conditional: `READ` enables [`std::io::Read`],
+/// `WRITE` enables [`std::io::Write`], and `SEEK` enables [`std::io::Seek`].
+/// Import the corresponding trait to call its methods.
+///
+/// Shared operations are documented on [`PyFile`]: [`new`](PyFile::new),
+/// [`py_new`](PyFile::py_new), [`bind`](PyFile::bind), [`into_bound`](PyFile::into_bound),
+/// and object access. `FILENO` enables [`fileno`](PyFile::fileno).
+/// `Clone`, `Debug` and `FromPyObject` are also implemented through that shared type.
+///
+/// Start with [`BinaryRead`], [`BinaryWrite`] or [`BinaryReadSeek`], or browse the
+/// [complete alias catalog](aliases). The attached reference is [`BoundPyBinaryFile`].
 pub type PyBinaryFile<const READ: bool, const WRITE: bool, const SEEK: bool, const FILENO: bool> =
     PyFile<Binary, READ, WRITE, SEEK, FILENO>;
 
@@ -43,10 +57,30 @@ pub type PyBinaryFile<const READ: bool, const WRITE: bool, const SEEK: bool, con
 /// As [`PyBinaryFile`], except that Python counts a text `read(size)` in characters, so this
 /// deliberately does not implement [`std::io::Read`]: it has a character API instead, and seeks
 /// by the opaque cookies `tell()` produces rather than by byte offsets.
+///
+/// # API guide
+///
+/// The inherent implementations below are conditional: `READ` enables character reads,
+/// `WRITE` enables character writes and flushing, and `SEEK` enables opaque-cookie seeking.
+/// No text file implements `std::io::Read`, `Write` or `Seek`.
+///
+/// Shared operations are documented on [`PyFile`]: [`new`](PyFile::new),
+/// [`py_new`](PyFile::py_new), [`bind`](PyFile::bind), [`into_bound`](PyFile::into_bound),
+/// and object access. `FILENO` enables [`fileno`](PyFile::fileno).
+/// `Clone`, `Debug` and `FromPyObject` are also implemented through that shared type.
+///
+/// Start with [`TextRead`], [`TextWrite`] or [`TextReadSeek`], or browse the
+/// [complete alias catalog](aliases). The attached reference is [`BoundPyTextFile`].
 pub type PyTextFile<const READ: bool, const WRITE: bool, const SEEK: bool, const FILENO: bool> =
     PyFile<Text, READ, WRITE, SEEK, FILENO>;
 
-/// A [`PyBinaryFile`] with the GIL held. See [`BoundFile`].
+/// A binary file tied to an attached Python token.
+///
+/// Obtain it with [`PyFile::bind`] or [`PyFile::into_bound`]. The trait implementations
+/// below use the same capability flags as [`PyBinaryFile`], without attaching per call.
+/// Shared [`as_py_object`](BoundFile::as_py_object), [`unbind`](BoundFile::unbind) and
+/// conditional [`fileno`](BoundFile::fileno) methods are documented on [`BoundFile`].
+/// See the [bound alias catalog](aliases::bound) for concrete signatures.
 pub type BoundPyBinaryFile<
     'py,
     const READ: bool,
@@ -55,7 +89,13 @@ pub type BoundPyBinaryFile<
     const FILENO: bool,
 > = BoundFile<'py, Binary, READ, WRITE, SEEK, FILENO>;
 
-/// A [`PyTextFile`] with the GIL held. See [`BoundFile`].
+/// A text file tied to an attached Python token.
+///
+/// Obtain it with [`PyFile::bind`] or [`PyFile::into_bound`]. The inherent implementations
+/// below use the same capability flags as [`PyTextFile`], without attaching per call.
+/// Shared [`as_py_object`](BoundFile::as_py_object), [`unbind`](BoundFile::unbind) and
+/// conditional [`fileno`](BoundFile::fileno) methods are documented on [`BoundFile`].
+/// See the [bound alias catalog](aliases::bound) for concrete signatures.
 pub type BoundPyTextFile<
     'py,
     const READ: bool,
@@ -64,15 +104,24 @@ pub type BoundPyTextFile<
     const FILENO: bool,
 > = BoundFile<'py, Text, READ, WRITE, SEEK, FILENO>;
 
-mod aliases;
-pub use aliases::*;
+pub mod aliases;
 
-/// The shared implementation behind [`PyBinaryFile`] and [`PyTextFile`].
-///
-/// Not the public face of anything: `M` is sealed to [`Binary`] and [`Text`], and the two aliases
-/// are what the documentation and the error messages talk about. It exists as one type because
-/// construction, capability checking and the `Py`/`Bound` split are identical for both kinds.
+// Keep every existing root import valid, but put the complete catalogs in their own pages.
 #[doc(hidden)]
+pub use aliases::bound::*;
+#[doc(hidden)]
+pub use aliases::*;
+#[doc(inline)]
+pub use aliases::{BinaryRead, BinaryReadSeek, BinaryWrite, TextRead, TextReadSeek, TextWrite};
+
+/// Shared construction, binding and object access for owned binary and text files.
+///
+/// Start with [`BinaryRead`], [`BinaryWrite`], [`TextRead`] or another [named alias](aliases),
+/// rather than spelling this type's parameters yourself. All owned aliases share the
+/// constructors and binding methods documented here; `M` is sealed to [`Binary`] and [`Text`].
+///
+/// Use [`PyBinaryFile`] for the binary I/O reference and [`PyTextFile`] for the text API.
+/// [`bind`](Self::bind) and [`into_bound`](Self::into_bound) produce the attached [`BoundFile`].
 pub struct PyFile<M, const READ: bool, const WRITE: bool, const SEEK: bool, const FILENO: bool> {
     obj: Py<PyAny>,
     // `fn() -> M` rather than `M` so the auto traits and variance come from `Py<PyAny>` alone
@@ -331,9 +380,11 @@ where
     }
 }
 
-/// The shared GIL-bound implementation behind [`BoundPyBinaryFile`] and [`BoundPyTextFile`].
+/// Shared object access and token release for attached binary and text files.
 ///
-/// See [`PyFile`] for why this is one type rather than two.
+/// Use [`BoundPyBinaryFile`] for the binary I/O reference and [`BoundPyTextFile`] for
+/// the text API. The [bound alias catalog](aliases::bound) lists concrete signatures.
+/// See [`PyFile`] for shared construction and binding.
 ///
 /// This is the same split `pyo3` uses for its own types: the detached form owns a `Py<PyAny>` and
 /// is `Send + 'static`, and this borrows a `Python<'py>` token so the operations do not have to
