@@ -9,7 +9,7 @@ import tempfile
 from typing import BinaryIO
 
 
-def peak_rss():
+def peak_rss() -> int:
     """Return the measured process high-water RSS in bytes, not allocator usage."""
     if sys.platform == "linux":
         # getrusage can retain a parent's pre-exec high-water mark. VmHWM belongs to
@@ -26,7 +26,7 @@ def peak_rss():
     return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--profile", choices=("debug", "release"), default="release")
     parser.add_argument("--size", type=int, required=True)

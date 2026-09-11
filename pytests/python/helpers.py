@@ -85,7 +85,7 @@ class NonBlocking:
     to wait for anything.
     """
 
-    def read(self, size: int, /):
+    def read(self, size: int, /) -> bytes | None:
         return b"" if size == 0 else None
 
 

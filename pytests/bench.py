@@ -14,36 +14,44 @@ import subprocess
 import sys
 import tempfile
 import time
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any, BinaryIO
 
-IMPLEMENTATIONS = ("typed-detached", "typed-bound", "legacy", "filelike")
+IMPLEMENTATIONS: tuple[str, ...] = ("typed-detached", "typed-bound", "legacy", "filelike")
+
+# A benchmark step: resetting, running, or checking. Results are discarded, so every
+# step shares one shape and `report` stays oblivious to what each step returns.
+# The ellipsis keeps the `name=name` closures used to freeze loop variables; every
+# step is still invoked with no arguments.
+Step = Callable[..., object]
 
 
-def positive(value):
+def positive(value: str) -> int:
     number = int(value)
     if number <= 0:
         raise argparse.ArgumentTypeError("must be positive")
     return number
 
 
-def check_equal(actual, expected):
+def check_equal(actual: object, expected: object) -> None:
     if actual != expected:
         raise ValueError("incorrect result (excluded from timing)")
 
 
-def check_construct(ext, stream, name, count):
+def check_construct(ext: Any, stream: BinaryIO, name: str, count: int) -> None:
     """Run one construction batch; `bench_construct` returns None by design."""
     ext.bench_construct(stream, name, count)
 
 
-def report(label, cases, args, divisor=1):
+def report(label: str, cases: dict[str, tuple[Step, Step, Step]], args: argparse.Namespace, divisor: float = 1) -> None:
     """Cases are (reset, call, check); neither reset nor check is timed.
 
     Rotate implementation order between repeats and report median repeat means.
     Results are dropped inside the timed call, identically for every adapter.
     """
     samples: dict[str, list[float]] = {}
-    active = {}
+    active: dict[str, tuple[Step, Step]] = {}
     for name, (reset, call, check) in cases.items():
         try:
             reset()
@@ -79,7 +87,7 @@ def report(label, cases, args, divisor=1):
               f"[{min(values):.3f}, {max(values):.3f}]")
 
 
-def binary_cases(ext, stream, data, chunk):
+def binary_cases(ext: Any, stream: BinaryIO, data: bytes, chunk: int) -> dict[str, tuple[Step, Step, Step]]:
     return {
         name: (
             lambda: stream.seek(0),
@@ -90,12 +98,12 @@ def binary_cases(ext, stream, data, chunk):
     }
 
 
-def write_cases(ext, stream, block, count, flush):
-    def reset():
+def write_cases(ext: Any, stream: BinaryIO, block: bytes, count: int, flush: bool) -> dict[str, tuple[Step, Step, Step]]:
+    def reset() -> None:
         stream.seek(0)
         stream.truncate()
 
-    def check(name):
+    def check(name: str) -> None:
         check_equal(ext.bench_write(stream, name, block, count, flush), len(block) * count)
         stream.seek(0)
         check_equal(stream.read(), block * count)
@@ -109,7 +117,7 @@ def write_cases(ext, stream, block, count, flush):
     }
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--profile", choices=("release", "debug"), default="release")
     parser.add_argument("--quick", action="store_true", help="small CI/smoke workload")
@@ -123,9 +131,9 @@ def main():
     args = parser.parse_args()
     args.repeats = args.repeats or (2 if args.quick else 5)
     args.iterations = args.iterations or (2 if args.quick else 10)
-    size = args.size or (16384 if args.quick else 1048576)
-    chunks = args.chunks or ([64, 4096] if args.quick else [64, 4096, 65536])
-    constructors = args.constructors or (100 if args.quick else 2000)
+    size: int = args.size or (16384 if args.quick else 1048576)
+    chunks: list[int] = args.chunks or ([64, 4096] if args.quick else [64, 4096, 65536])
+    constructors: int = args.constructors or (100 if args.quick else 2000)
     sys.path.insert(0, str(Path(__file__).resolve().parent / "python"))
     from _extension import install
     extension_path = install(args.profile)
@@ -150,7 +158,7 @@ def main():
     print("Text compares identical whole Unicode strings, never characters against bytes.")
     print("Use --memory for fresh-process peak RSS; it is not per-adapter allocation cost.\n")
 
-    data = (bytes(range(256)) * ((size + 255) // 256))[:size]
+    data: bytes = (bytes(range(256)) * ((size + 255) // 256))[:size]
     with io.BytesIO(data) as memory, tempfile.TemporaryFile("w+b") as disk:
         disk.write(data)
         disk.flush()

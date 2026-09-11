@@ -38,7 +38,7 @@ BINARY_REQUIRED = {
 }
 
 
-def require(condition, message):
+def require(condition: object, message: str) -> None:
     if not condition:
         raise AssertionError(message)
 
@@ -46,7 +46,18 @@ def require(condition, message):
 class Page(HTMLParser):
     """Retain semantic headings, links and IDs, not rustdoc's CSS or markup."""
 
-    def __init__(self, path):
+    path: Path
+    ids: set[str]
+    links: list[tuple[str, str | None]]
+    alias_links: list[str]
+    in_term: bool
+    main: bool
+    section: str
+    heading: tuple[int, list[str]] | None
+    headings: set[str]
+    redirect: str | None
+
+    def __init__(self, path: Path) -> None:
         super().__init__(convert_charrefs=True)
         self.path = path
         self.ids = set()
@@ -61,37 +72,38 @@ class Page(HTMLParser):
         self.feed(path.read_text(encoding="utf-8"))
         self.close()
 
-    def handle_starttag(self, tag, attrs):
-        attrs = dict(attrs)
-        if "id" in attrs:
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        # `dict` keeps the last value for duplicate attributes, matching browser behavior.
+        attributes = dict(attrs)
+        if "id" in attributes:
             # Rustdoc also percent-encodes some literal impl IDs in the HTML.
             # A valueless `id` attribute parses as None; there is nothing to record then.
-            element_id = attrs["id"]
+            element_id = attributes["id"]
             assert element_id is not None
             self.ids.add(unquote(element_id))
         if tag == "main":
             self.main = True
         if tag == "dt":
             self.in_term = True
-        if tag == "meta" and (attrs.get("http-equiv") or "").lower() == "refresh":
-            match = re.search(r"url\s*=\s*(.+)", attrs.get("content") or "", re.I)
+        if tag == "meta" and (attributes.get("http-equiv") or "").lower() == "refresh":
+            match = re.search(r"url\s*=\s*(.+)", attributes.get("content") or "", re.I)
             if match:
                 self.redirect = match.group(1).strip().strip("'\"")
         if self.main and re.fullmatch(r"h[1-6]", tag):
             self.heading = (int(tag[1]), [])
-        if tag == "a" and "href" in attrs:
-            href = attrs["href"]
+        if tag == "a" and "href" in attributes:
+            href = attributes["href"]
             assert href is not None, "valueless href attribute"
             self.links.append((href, self.section if self.main else None))
             # Only catalog entries, not aliases mentioned in their descriptions.
             if self.main and self.in_term and self.section == "Type Aliases":
-                self.alias_links.append(attrs["href"])
+                self.alias_links.append(href)
 
-    def handle_data(self, data):
+    def handle_data(self, data: str) -> None:
         if self.heading is not None:
             self.heading[1].append(data)
 
-    def handle_endtag(self, tag):
+    def handle_endtag(self, tag: str) -> None:
         if re.fullmatch(r"h[1-6]", tag) and self.heading is not None:
             level, parts = self.heading
             title = " ".join("".join(parts).replace("§", "").split())
@@ -106,18 +118,21 @@ class Page(HTMLParser):
 
 
 class Docs:
-    def __init__(self, root):
+    root: Path
+    pages: dict[Path, Page]
+
+    def __init__(self, root: Path) -> None:
         self.root = root.resolve()
         self.pages = {}
 
-    def page(self, path):
+    def page(self, path: Path) -> Page:
         path = path.resolve()
         require(path.is_file(), f"Missing rustdoc page: {path}")
         if path not in self.pages:
             self.pages[path] = Page(path)
         return self.pages[path]
 
-    def resolve(self, source, href):
+    def resolve(self, source: Path, href: str) -> tuple[Page, str] | None:
         """Follow local rustdoc redirects, preserving URL-decoded fragments."""
         url = urlsplit(urljoin(source.as_uri(), href))
         if url.scheme != "file":
@@ -126,7 +141,7 @@ class Docs:
         if not path.is_relative_to(self.root) or path.suffix != ".html":
             return None  # Dependencies, source listings and rustdoc assets.
         fragment = unquote(url.fragment)
-        visited = set()
+        visited: set[Path] = set()
         while True:
             require(path not in visited, f"Rustdoc redirect cycle: {source} -> {href}")
             visited.add(path)
@@ -139,7 +154,7 @@ class Docs:
             require(path.is_relative_to(self.root), f"Redirect leaves crate: {path}")
             fragment = unquote(target.fragment) or fragment
 
-    def validate_links(self):
+    def validate_links(self) -> None:
         for path in sorted(self.root.rglob("*.html")):
             page = self.page(path)
             for href, _ in page.links:
@@ -154,7 +169,7 @@ class Docs:
             if page.redirect:
                 self.resolve(path, page.redirect)
 
-    def aliases(self, relative):
+    def aliases(self, relative: str) -> set[str]:
         page = self.page(self.root / relative)
         require("Type Aliases" in page.headings, f"No Type Aliases section: {relative}")
         return {
@@ -163,14 +178,14 @@ class Docs:
             if re.search(r"(?:^|/)type\.[^/]+\.html$", urlsplit(href).path)
         }
 
-    def methods(self, relative, expected):
+    def methods(self, relative: str, expected: set[str]) -> Page:
         page = self.page(self.root / relative)
         for method in sorted(expected):
             require(f"method.{method}" in page.ids, f"{relative} is missing method.{method}")
         return page
 
 
-def catalog_names(bound=False):
+def catalog_names(bound: bool = False) -> set[str]:
     # Deliberately independent of the Rust macro table and any private generator.
     return {
         ("Bound" if bound else "") + kind
@@ -183,7 +198,7 @@ def catalog_names(bound=False):
     }
 
 
-def check_summary(docs, name, capabilities):
+def check_summary(docs: Docs, name: str, capabilities: tuple[str, ...]) -> None:
     bound = name.startswith("Bound")
     kind = "Text" if "Text" in name else "Binary"
     subdir = docs.root / "aliases" / ("bound" if bound else "")
@@ -191,7 +206,7 @@ def check_summary(docs, name, capabilities):
     path = subdir / f"type.{name}.html"
     page = docs.page(path)
     require("Available operations" in page.headings, f"{name}: missing Available operations heading")
-    operations = []
+    operations: list[tuple[str, str]] = []
     for href, section in page.links:
         if section == "Available operations":
             target = docs.resolve(path, href)
@@ -209,14 +224,14 @@ def check_summary(docs, name, capabilities):
     methods = {method for _, method in operations}
     require(required <= methods, f"{name}: missing summary methods {required - methods}")
     require(methods <= allowed, f"{name}: unrequested summary methods {methods - allowed}")
-    for target, method in operations:
+    for target_name, method in operations:
         expected = shared if method in common else family
-        require(target == expected, f"{name}: {method} links to {target}, expected {expected}")
+        require(target_name == expected, f"{name}: {method} links to {target_name}, expected {expected}")
     if bound:
         require(not (CONSTRUCTORS & methods), f"{name}: bound alias claims constructors")
 
 
-def check_docs(root, unix):
+def check_docs(root: Path, unix: bool) -> None:
     docs = Docs(root)
     for relative, expected in (
         ("index.html", COMMON | FAMILIES),
@@ -275,7 +290,7 @@ def check_docs(root, unix):
     docs.validate_links()
 
 
-def main():
+def main() -> None:
     version = subprocess.check_output(["rustc", "-vV"], cwd=ROOT, text=True)
     host = next(
         (line.removeprefix("host: ") for line in version.splitlines() if line.startswith("host: ")),
