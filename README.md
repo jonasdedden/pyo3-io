@@ -153,20 +153,28 @@ An ABC with a `__subclasshook__`, like `collections.abc.Iterable` — `_is_proto
 `[BufferedReader, _BufferedIOBase, _IOBase, object]` and it passes `isinstance` through the hook
 alone, as does a class inheriting from nothing at all.
 
-For `isinstance` purposes the behaviour is the same as a real `runtime_checkable` protocol anyway
-— both look at the class, so a `read` served by `__getattr__` fails both. Where it differs from
-`hasattr` is in both directions:
+That is not a cosmetic difference. There are three ways to ask "does this support reading", and
+they are nested rather than equivalent:
 
-| | `hasattr` | `isinstance(.., io.Reader)` |
-|---|---|---|
-| `read` served by `__getattr__` | yes | no — the check looks at the class |
-| `io.Reader.register(Cls)`, no `read` | no | yes — an explicit declaration |
+| object | `hasattr` | `runtime_checkable` protocol | `io.Reader` |
+|---|---|---|---|
+| `read` defined on the class, as usual | yes | yes | yes |
+| `self.read = ...` in `__init__` | yes | **yes** | **no** |
+| `read` served by `__getattr__` | yes | no | no |
+| `io.Reader.register(Cls)`, no `read` | no | no | **yes** |
 
-So either answer counts. One is a working implementation and the other is the class author saying
-so on purpose; requiring both would turn away a `__getattr__`-based reader that works today.
+`hasattr` is an ordinary attribute lookup, so `__getattr__` counts. A `runtime_checkable` protocol
+uses `inspect.getattr_static` since 3.12, which sees an attribute put on the instance but
+deliberately does not trigger `__getattr__`. `io.Reader`'s hook is `_check_methods`, which walks
+the class MRO and sees neither.
 
-**What this actually buys** is narrow, and worth stating plainly: `hasattr` already covered the
-common path, so the only new acceptance is a class that declares itself with `register()`. The
+So `io.Reader` is the *narrowest* of the three, which is why it is accepted alongside `hasattr`
+rather than instead of it: requiring it would turn away both of the middle rows, which work
+today. Either answer counts — one is a working implementation, the other is the class author
+declaring themselves on purpose.
+
+**What this actually buys** is narrow, and worth stating plainly: `hasattr` is wider on every row
+but the last, so the only new acceptance is a class that declares itself with `register()`. The
 reason it is worth having at all is that there was previously no runtime answer to "does this
 support reading" in the standard library — `_typeshed.SupportsRead` is a stubs-only name and
 `import _typeshed` raises `ModuleNotFoundError` — so `hasattr` was the only option. On 3.14 there

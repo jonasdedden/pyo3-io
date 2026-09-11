@@ -446,9 +446,11 @@ class TestIoReaderAndWriter:
 
     The docs call them protocols "decorated with `@typing.runtime_checkable`" and typeshed
     declares them `class Reader(Protocol[_T_co])`. The runtime class is neither: it is an ABC with
-    a `__subclasshook__`, like `collections.abc.Iterable`. The `isinstance` behaviour matches a
-    real runtime_checkable protocol anyway; where it differs is from `hasattr`, in both
-    directions, so either answer counts.
+    a `__subclasshook__`, like `collections.abc.Iterable`.
+
+    That is not a cosmetic difference. The three ways of asking "does this support reading" are
+    nested rather than equivalent, and `io.Reader` is the narrowest of them, which is why it is
+    accepted *alongside* `hasattr` rather than instead of it.
     """
 
     def test_what_they_actually_are(self):
@@ -471,23 +473,58 @@ class TestIoReaderAndWriter:
 
         assert isinstance(InheritsNothing(), io.Reader)
 
-    def test_they_behave_like_a_real_runtime_checkable_protocol(self):
-        """So the ABC-versus-Protocol difference is in what they are, not in what they do."""
+    def test_an_ordinary_implementation_satisfies_everything(self):
+        """The baseline, so the rows below are read as the exceptions they are."""
 
+        class Normal:
+            def read(self, size=-1, /) -> bytes:
+                return BYTES[:size] if size is not None and size >= 0 else BYTES
+
+        obj = Normal()
+        assert hasattr(obj, "read")
+        assert isinstance(obj, io.Reader)
+        assert isinstance(obj, self.supports_read())
+        assert ext.binary_read_exactly(obj, 4) == BYTES[:4]
+
+    @staticmethod
+    def supports_read():
         @typing.runtime_checkable
         class SupportsRead(typing.Protocol):
             def read(self, size: int = ..., /): ...
 
+        return SupportsRead
+
+    def test_the_three_checks_are_nested_not_equivalent(self):
+        """`hasattr` is the widest, `io.Reader` the narrowest, a protocol in between.
+
+        `hasattr` is an ordinary attribute lookup, so `__getattr__` counts. A
+        `runtime_checkable` protocol uses `inspect.getattr_static` since 3.12, which sees an
+        attribute put on the instance but deliberately does not trigger `__getattr__`.
+        `io.Reader`'s hook is `_check_methods`, which walks the class MRO and sees neither.
+        """
+        supports_read = self.supports_read()
+
         class ViaGetattr:
             def __getattr__(self, name):
                 if name == "read":
-                    return lambda size=-1, /: b""
+                    return lambda size=-1, /: BYTES[:size] if size >= 0 else BYTES
                 raise AttributeError(name)
 
-        obj = ViaGetattr()
-        assert hasattr(obj, "read")
-        assert not isinstance(obj, io.Reader)
-        assert not isinstance(obj, SupportsRead)  # identical verdict
+        class ReadOnTheInstance:
+            def __init__(self):
+                self.read = lambda size=-1, /: BYTES[:size] if size >= 0 else BYTES
+
+        dynamic, on_instance = ViaGetattr(), ReadOnTheInstance()
+
+        assert hasattr(dynamic, "read") and hasattr(on_instance, "read")
+        assert not isinstance(dynamic, supports_read)
+        assert isinstance(on_instance, supports_read)  # <- where the two checks part company
+        assert not isinstance(dynamic, io.Reader)
+        assert not isinstance(on_instance, io.Reader)
+
+        # Accepting either means both work here, which `io.Reader` alone would not manage.
+        assert ext.binary_read_exactly(dynamic, 4) == BYTES[:4]
+        assert ext.binary_read_exactly(on_instance, 4) == BYTES[:4]
 
     def test_typeshed_supports_read_is_not_importable_at_runtime(self):
         """Which is why `hasattr` was the only option before 3.14."""

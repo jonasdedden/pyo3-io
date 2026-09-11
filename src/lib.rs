@@ -282,17 +282,19 @@ where
         };
         // `io.Reader` and `io.Writer`, new in 3.14. The docs call them protocols decorated with
         // `@typing.runtime_checkable` and typeshed declares them as such, but the runtime class
-        // is an ABC with a `__subclasshook__`, like `collections.abc.Iterable`. For `isinstance`
-        // that behaves the same as a real runtime-checkable protocol; where it differs is from
-        // `hasattr`, in both directions. A `read` served by `__getattr__` satisfies `hasattr` but
-        // not the class-level check, and a class passed to `io.Reader.register(..)` satisfies the
-        // check while having no `read` at all.
+        // is an ABC with a `__subclasshook__`, like `collections.abc.Iterable`.
         //
-        // Either is a good enough answer -- one is a working implementation, the other an
-        // explicit declaration -- so this accepts either, which is wider than `hasattr` alone and
-        // never narrower. The gain is only that `register()` case; what makes it worth having is
-        // that there was no runtime answer to this question in the standard library before 3.14,
-        // `_typeshed.SupportsRead` being a stubs-only name.
+        // The three ways of asking this are nested, not equivalent. `hasattr` is an ordinary
+        // lookup, so `__getattr__` counts. A runtime-checkable protocol uses
+        // `inspect.getattr_static` since 3.12, which sees an attribute put on the instance but
+        // not one conjured by `__getattr__`. `io.Reader`'s `_check_methods` walks the class MRO
+        // and sees neither, making it the narrowest of the three.
+        //
+        // So it is accepted *alongside* `hasattr`, never instead of it: requiring it would turn
+        // away a `__getattr__` reader and an instance-assigned one, both of which work. The only
+        // thing it adds is a class passed to `io.Reader.register(..)`, which declares itself
+        // without having the attribute. Worth having because before 3.14 the standard library had
+        // no runtime answer here at all -- `_typeshed.SupportsRead` is a stubs-only name.
         let require_protocol = |protocol: Option<&Bound<'_, PyAny>>,
                                 name: &Bound<'_, PyString>,
                                 method: &'static str|
