@@ -87,6 +87,27 @@ pub enum Error {
         what: &'static str,
     },
 
+    /// The object has the method but says it will refuse to do it.
+    ///
+    /// `io.IOBase` defines `readable()`, `writable()` and `seekable()` as queries with exactly
+    /// this meaning: if one is false, the corresponding call raises. Every stream in the
+    /// hierarchy inherits the methods, including the ones that do not implement the operation, so
+    /// this is the only check that can tell a reader from a writer.
+    #[error(
+        "object of type {type_name} reports {query}() is False, so .{method}() would raise. \
+         It was extracted as a file with the {capability} capability."
+    )]
+    RefusesCapability {
+        /// The Python type.
+        type_name: String,
+        /// `readable`, `writable` or `seekable`.
+        query: &'static str,
+        /// The method that would have been called.
+        method: &'static str,
+        /// How the capability is spelled in `PyFile`'s parameters.
+        capability: &'static str,
+    },
+
     /// The object is missing a method the requested capabilities need.
     #[error("object of type {type_name} has no .{method}() method")]
     MissingMethod {
@@ -155,7 +176,9 @@ impl From<Error> for io::Error {
             | Error::ImpossibleWriteCount { .. } => io::ErrorKind::InvalidData,
             Error::WroteNothing { .. } => io::ErrorKind::WriteZero,
             Error::OutOfRange { .. } => io::ErrorKind::InvalidInput,
-            Error::MissingMethod { .. } | Error::WrongKind { .. } => io::ErrorKind::InvalidInput,
+            Error::MissingMethod { .. }
+            | Error::RefusesCapability { .. }
+            | Error::WrongKind { .. } => io::ErrorKind::InvalidInput,
             // `pyo3` already maps the OS-shaped exceptions, including BlockingIOError, so a
             // stream that raises rather than returning None lands on the same kind.
             Error::Python(_) => {
@@ -174,9 +197,9 @@ impl From<Error> for PyErr {
         match err {
             Error::Python(err) => err,
             // These are the extraction-time checks, and a wrong argument is a TypeError.
-            err @ (Error::MissingMethod { .. } | Error::WrongKind { .. }) => {
-                PyTypeError::new_err(err.to_string())
-            }
+            err @ (Error::MissingMethod { .. }
+            | Error::RefusesCapability { .. }
+            | Error::WrongKind { .. }) => PyTypeError::new_err(err.to_string()),
             err @ Error::WouldBlock { .. } => PyBlockingIOError::new_err(err.to_string()),
             err => io::Error::from(err).into(),
         }

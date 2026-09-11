@@ -131,6 +131,36 @@ one check and be wrong: `tempfile.SpooledTemporaryFile` derives from `IOBase` al
 Every method the Rust side will call is looked for up front, with `hasattr`. On Python 3.14 and
 newer, `io.Reader` and `io.Writer` are accepted as an alternative answer for `read` and `write`.
 
+Presence is not enough on its own, though. `io.IOBase` gives *every* stream a `read`, a `write`
+and a `seek`, including the ones that only raise, so a file opened `"wb"` has a `read` that
+`hasattr` is perfectly happy with:
+
+```python
+>>> f = open(path, "wb")
+>>> hasattr(f, "read")      # True  -- inherited, and it raises
+>>> f.readable()            # False
+```
+
+So for objects in the hierarchy the direction is asked directly. `readable()`, `writable()` and
+`seekable()` are documented with exactly this meaning — *"if False, read() will raise OSError"* —
+and a stream that answers `False` is refused:
+
+```text
+TypeError: object of type BufferedWriter reports readable() is False, so .read() would raise.
+It was extracted as a file with the READ capability.
+```
+
+These are queries rather than operations, but they are only asked of `io.IOBase` instances, where
+the ABC defines what they mean; on anything else they would be arbitrary code, so a duck-typed
+object is left to fail at the first real call. A raise or a non-`bool` is not an answer either,
+and falls through rather than rejecting.
+
+`mode` was the other candidate for this and is worse on every axis. Nine of the forty objects
+surveyed are `io.IOBase` with no usable `mode` — `io.BytesIO`, `io.StringIO`, `io.TextIOWrapper`,
+`gzip.open(.., "rt")`, a text subprocess pipe — where **none** of them lack `readable()`. It would
+also need parsing `"r"`, `"w"`, `"a"`, `"x"` and `"+"`, and `readable()` is what the standard
+library itself uses.
+
 They are worth being precise about, because the documentation and the implementation disagree.
 [The docs](https://docs.python.org/3/library/io.html#static-typing) say they are protocols
 "decorated with `@typing.runtime_checkable`", and typeshed declares them
@@ -486,7 +516,7 @@ its classes belong. The `pyo3` crate itself needs no change.
   does, for all thirty aliases.
 - **3 comparison tests** (`tests/comparison.rs`) — the type-level claims the table above makes
   about `pyo3-filelike`, so it fails rather than going quietly out of date.
-- **200 runtime tests** (`pytests/python/`) — payload round-tripping, character-vs-byte counting,
+- **211 runtime tests** (`pytests/python/`) — payload round-tripping, character-vs-byte counting,
   the classification ladder against every standard-library file-like object, capability checks,
   misbehaving objects, and two files of side-by-side comparisons asserting both what `pyo3-file`
   and `pyo3-filelike` do today and what this crate does instead.

@@ -135,6 +135,7 @@ macro_rules! cached_optional {
     };
 }
 
+cached!(io_base, "io", "IOBase");
 cached!(text_io_base, "io", "TextIOBase");
 cached!(raw_io_base, "io", "RawIOBase");
 cached!(buffered_io_base, "io", "BufferedIOBase");
@@ -308,17 +309,59 @@ where
                 _ => Err(missing(method)?),
             }
         };
+        // `io.IOBase` gives every stream a `read`, a `write` and a `seek`, including the ones
+        // that only raise, so `hasattr` cannot tell a reader from a writer: a file opened `"wb"`
+        // has a `read` that raises `UnsupportedOperation`. The hierarchy answers that question
+        // itself, and these are queries rather than operations -- the documentation for
+        // `readable()` is literally "if False, read() will raise OSError".
+        //
+        // Only asked of `io.IOBase` instances, where the ABC defines what they mean. On anything
+        // else they would be arbitrary code, so a duck-typed object is left to fail at the first
+        // real call. `mode` was the other candidate and is worse on every axis: nine of the forty
+        // objects surveyed are `IOBase` with no usable `mode` -- `io.BytesIO`, `io.StringIO`,
+        // `io.TextIOWrapper`, `gzip.open(.., "rt")`, a text subprocess pipe -- where none lack
+        // `readable()`, and it would need parsing `"r"`, `"w"`, `"a"`, `"x"` and `"+"` besides.
+        let refuses = |query: &'static str| -> Result<bool, Error> {
+            if !obj.is_instance(io_base(py)?)? {
+                return Ok(false);
+            }
+            // A raise, or anything that is not a bool, is not an answer.
+            Ok(obj
+                .call_method0(query)
+                .ok()
+                .and_then(|answer| answer.extract::<bool>().ok())
+                == Some(false))
+        };
+        let require_capability = |query: &'static str,
+                                  method: &'static str,
+                                  capability: &'static str|
+         -> Result<(), Error> {
+            if refuses(query)? {
+                Err(Error::RefusesCapability {
+                    type_name: obj.get_type().name()?.to_string(),
+                    query,
+                    method,
+                    capability,
+                })
+            } else {
+                Ok(())
+            }
+        };
+
         if READ {
             require_protocol(io_reader(py)?, intern!(py, "read"), "read")?;
+            require_capability("readable", "read", "READ")?;
         }
         if WRITE {
             require_protocol(io_writer(py)?, intern!(py, "write"), "write")?;
+            require_capability("writable", "write", "WRITE")?;
             // `flush` is deliberately not required. An object that has none has nothing to flush,
             // so flushing it is a no-op rather than an error, and demanding it would turn away
             // every minimal writer that implements nothing but `write`.
         }
         if SEEK {
             require(intern!(py, "seek"), "seek")?;
+            require_capability("seekable", "seek", "SEEK")?;
             if M::IS_TEXT {
                 // Text streams only accept opaque cookies, which come from tell()
                 require(intern!(py, "tell"), "tell")?;

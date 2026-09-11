@@ -590,3 +590,96 @@ class TestIoReaderAndWriter:
         for name, factory in binary_factories(files).items():
             handle = factory()
             assert isinstance(handle, io.Reader) or hasattr(handle, "read"), name
+
+
+class TestDirectionChecks:
+    """A writer handed to something that wants a reader, caught at the boundary.
+
+    `io.IOBase` gives every stream a `read`, a `write` and a `seek`, including the ones that only
+    raise, so `hasattr` cannot tell them apart. `readable()`, `writable()` and `seekable()` are
+    the hierarchy's own answer, and their documented meaning is exactly this: if one is false, the
+    corresponding call raises.
+    """
+
+    def test_hasattr_alone_cannot_tell_a_writer_from_a_reader(self, tmp_path):
+        """The gap this closes."""
+        path = tmp_path / "w.bin"
+        with open(path, "wb") as handle:
+            assert hasattr(handle, "read")  # inherited, and it raises
+            assert handle.readable() is False
+
+    def test_a_write_only_file_is_refused_as_a_reader(self, tmp_path):
+        path = tmp_path / "w.bin"
+        with open(path, "wb") as handle:
+            with pytest.raises(TypeError, match=r"readable\(\) is False"):
+                ext.binary_read_all(handle)
+
+    def test_a_read_only_file_is_refused_as_a_writer(self, files):
+        with open(files["bin"], "rb") as handle:
+            with pytest.raises(TypeError, match=r"writable\(\) is False"):
+                ext.binary_write(handle, BYTES)
+
+    def test_the_same_for_text(self, tmp_path, files):
+        path = tmp_path / "w.txt"
+        with open(path, "w", encoding="utf-8") as handle:
+            with pytest.raises(TypeError, match=r"readable\(\) is False"):
+                ext.text_read_all(handle)
+        with open(files["txt"], encoding="utf-8") as handle:
+            with pytest.raises(TypeError, match=r"writable\(\) is False"):
+                ext.text_write(handle, TEXT)
+
+    def test_an_unseekable_stream_is_refused_as_seekable(self):
+        """Sockets and pipes have a `seek` that raises."""
+        left, right = socket.socketpair()
+        try:
+            handle = left.makefile("rb")
+            assert hasattr(handle, "seek")
+            assert handle.seekable() is False
+            with pytest.raises(TypeError, match=r"seekable\(\) is False"):
+                ext.binary_seek_roundtrip(handle)
+        finally:
+            left.close()
+            right.close()
+
+    def test_a_read_write_file_satisfies_both(self, tmp_path):
+        path = tmp_path / "rw.bin"
+        path.write_bytes(b"")
+        with open(path, "w+b") as handle:
+            assert ext.binary_read_write(handle, BYTES) == 0
+
+    def test_the_message_names_the_capability(self, files):
+        with open(files["bin"], "rb") as handle:
+            with pytest.raises(TypeError, match="WRITE capability"):
+                ext.binary_write(handle, BYTES)
+
+    def test_duck_typed_objects_are_not_asked(self):
+        """These are only queries on `io.IOBase`. Elsewhere they would be arbitrary code."""
+
+        class LiesAboutItself:
+            def readable(self):
+                raise AssertionError("should never be called")
+
+            def read(self, size=-1, /) -> bytes:
+                return BYTES[:size] if size is not None and size >= 0 else BYTES
+
+        assert ext.binary_read_exactly(LiesAboutItself(), 4) == BYTES[:4]
+
+    def test_an_iobase_that_raises_from_the_query_is_not_rejected(self):
+        """A raise is not an answer, so it falls through rather than failing."""
+
+        class Awkward(io.RawIOBase):
+            def readable(self):
+                raise ValueError("cannot say")
+
+            def read(self, size=-1, /) -> bytes:
+                return BYTES[:size] if size is not None and size >= 0 else BYTES
+
+        assert ext.binary_read_exactly(Awkward(), 4) == BYTES[:4]
+
+    def test_every_standard_library_reader_still_passes(self, files):
+        for name, factory in binary_factories(files).items():
+            handle = factory()
+            try:
+                ext.binary_read_exactly(handle, 4)
+            except Exception as err:  # noqa: BLE001
+                pytest.fail(f"{name} should still be accepted as a reader: {err}")
