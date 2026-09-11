@@ -442,16 +442,7 @@ IO_PROTOCOLS = hasattr(io, "Reader") and hasattr(io, "Writer")
 
 @pytest.mark.skipif(not IO_PROTOCOLS, reason="io.Reader/io.Writer are new in Python 3.14")
 class TestIoReaderAndWriter:
-    """`io.Reader` and `io.Writer`, new in 3.14, accepted alongside `hasattr`.
-
-    The docs call them protocols "decorated with `@typing.runtime_checkable`" and typeshed
-    declares them `class Reader(Protocol[_T_co])`. The runtime class is neither: it is an ABC with
-    a `__subclasshook__`, like `collections.abc.Iterable`.
-
-    That is not a cosmetic difference. The three ways of asking "does this support reading" are
-    nested rather than equivalent, and `io.Reader` is the narrowest of them, which is why it is
-    accepted *alongside* `hasattr` rather than instead of it.
-    """
+    """Python ABC membership is neither required nor sufficient; callable lookup decides."""
 
     def test_what_they_actually_are(self):
         import abc
@@ -463,7 +454,7 @@ class TestIoReaderAndWriter:
 
     def test_nothing_has_to_inherit_from_them(self):
         """The `__subclasshook__` does the work, so `isinstance` passes without inheritance."""
-        with open("/etc/hostname", "rb") as handle:
+        with io.BytesIO() as handle:
             assert io.Reader not in type(handle).__mro__
             assert isinstance(handle, io.Reader)
 
@@ -522,7 +513,7 @@ class TestIoReaderAndWriter:
         assert not isinstance(dynamic, io.Reader)
         assert not isinstance(on_instance, io.Reader)
 
-        # Accepting either means both work here, which `io.Reader` alone would not manage.
+        # Normal callable lookup accepts both; requiring io.Reader membership would not.
         assert ext.binary_read_exactly(dynamic, 4) == BYTES[:4]
         assert ext.binary_read_exactly(on_instance, 4) == BYTES[:4]
 
@@ -536,8 +527,8 @@ class TestIoReaderAndWriter:
         with pytest.raises(TypeError, match="parameterized generic"):
             isinstance(io.BytesIO(), io.Reader[bytes])
 
-    def test_a_registered_class_is_accepted_without_the_method(self):
-        """`hasattr` says no; the explicit registration is taken as the answer."""
+    def test_a_registered_class_can_supply_a_dynamic_method(self):
+        """The callable returned by __getattr__, not registration, permits construction."""
 
         class DeclaresItself:
             def __getattr__(self, name):

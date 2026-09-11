@@ -117,12 +117,12 @@ pub enum Error {
         capability: &'static str,
     },
 
-    /// The object is missing a method the requested capabilities need.
-    #[error("object of type {type_name} has no .{method}() method")]
+    /// A required operation is absent or not callable.
+    #[error("object of type {type_name} has no .{method}() method (missing or not callable)")]
     MissingMethod {
         /// The Python type.
         type_name: String,
-        /// The method that is missing.
+        /// The required operation.
         method: &'static str,
     },
 

@@ -90,7 +90,10 @@ fn messages_say_what_to_do() {
         method: "flush",
     }
     .to_string();
-    assert_eq!(missing, "object of type Thing has no .flush() method");
+    assert_eq!(
+        missing,
+        "object of type Thing has no .flush() method (missing or not callable)"
+    );
 }
 
 #[test]

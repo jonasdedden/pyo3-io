@@ -1,8 +1,9 @@
 #![doc = include_str!("../README.md")]
 
+use pyo3::exceptions::{PyAttributeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::sync::PyOnceLock;
-use pyo3::types::PyString;
+use pyo3::types::{PyString, PyType};
 use pyo3::{intern, Borrowed, FromPyObject};
 use std::marker::PhantomData;
 
@@ -104,91 +105,37 @@ impl<M, const READ: bool, const WRITE: bool, const SEEK: bool, const FILENO: boo
     }
 }
 
-fn cached_type<'py>(
-    py: Python<'py>,
-    cell: &'static PyOnceLock<Py<PyAny>>,
-    module: &str,
-    name: &str,
-) -> PyResult<&'py Bound<'py, PyAny>> {
-    cell.get_or_try_init(py, || Ok(py.import(module)?.getattr(name)?.unbind()))
-        .map(|obj| obj.bind(py))
-}
-
-/// Declares a lazily imported, cached type object.
-macro_rules! cached {
-    ($name:ident, $module:literal, $attr:literal) => {
-        fn $name<'py>(py: Python<'py>) -> PyResult<&'py Bound<'py, PyAny>> {
-            static CELL: PyOnceLock<Py<PyAny>> = PyOnceLock::new();
-            cached_type(py, &CELL, $module, $attr)
-        }
-    };
-}
-
-/// Declares a lazily imported type that may not exist on this Python version.
-macro_rules! cached_optional {
-    ($name:ident, $module:literal, $attr:literal) => {
-        fn $name<'py>(py: Python<'py>) -> PyResult<Option<&'py Bound<'py, PyAny>>> {
-            static CELL: PyOnceLock<Option<Py<PyAny>>> = PyOnceLock::new();
-            let cell = CELL.get_or_try_init(py, || -> PyResult<_> {
-                Ok(py.import($module)?.getattr($attr).ok().map(Bound::unbind))
-            })?;
-            Ok(cell.as_ref().map(|obj| obj.bind(py)))
-        }
-    };
-}
-
-cached!(io_base, "io", "IOBase");
-cached!(text_io_base, "io", "TextIOBase");
-cached!(raw_io_base, "io", "RawIOBase");
-cached!(buffered_io_base, "io", "BufferedIOBase");
-// New in Python 3.14, so absent on everything older.
-cached_optional!(io_reader, "io", "Reader");
-cached_optional!(io_writer, "io", "Writer");
+// PyOnceLock detaches while waiting for initialization, avoiding interpreter/lock deadlocks.
+static IO_BASE: PyOnceLock<Py<PyType>> = PyOnceLock::new();
+static TEXT_IO_BASE: PyOnceLock<Py<PyType>> = PyOnceLock::new();
+static RAW_IO_BASE: PyOnceLock<Py<PyType>> = PyOnceLock::new();
+static BUFFERED_IO_BASE: PyOnceLock<Py<PyType>> = PyOnceLock::new();
 
 /// What an object says about the kind of payload it deals in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Payload {
-    /// Definitely `bytes`.
+    /// Declares a binary I/O contract.
     Binary,
-    /// Definitely `str`.
+    /// Declares a text I/O contract.
     Text,
     /// The object said nothing either way, so it is taken at its word.
     Unknown,
 }
 
-/// Works out what an object deals in, without touching it.
+/// Classifies the declared I/O hierarchy, without probing read or write.
 ///
-/// One signal, and it is structural on purpose: `io.TextIOBase` *is* the definition of a stream
-/// whose `read` returns `str`, and `io.RawIOBase`/`io.BufferedIOBase` of one that returns `bytes`.
-/// Anything the hierarchy does not cover is taken at its word, which is what keeps duck-typed
-/// objects working; the capability checks are then the only requirement.
-///
-/// Nothing here calls a method on the object. A `read(0)` probe would name the payload exactly —
-/// it is right for every standard-library object and consumes nothing — but `read` on an
-/// arbitrary object is arbitrary code, with no guarantee of being free of side effects or of
-/// returning at all. A handle is not a promise that the thing behind it is ready to be touched,
-/// and extraction is the wrong moment to find out.
-///
-/// Deliberately unused for the same reason a probe is: a `mode` attribute would settle 23 of the
-/// forty objects surveyed and be wrong about two, since `codecs.getreader(..)` wraps a binary file
-/// and reports *its* `"rb"` while producing `str`. The `encoding` and `errors` a text stream
-/// reports are a proxy for `io.TextIOBase`, which the check below already covers.
-///
-/// The returned string explains which rung fired, so a rejection can say why.
+/// Unknown ducks remain acceptable. Attributes such as `mode` and `encoding` are not reliable
+/// payload contracts: codecs wrappers can expose a binary mode while returning text.
+/// Python instance checks can execute custom code, and subclasses can violate their contracts.
 fn classify(obj: &Bound<'_, PyAny>) -> Result<(Payload, &'static str), Error> {
     let py = obj.py();
-    // `RawIOBase` and `BufferedIOBase` are siblings under `IOBase`, not one inside the other, and
-    // both halves are populated by ordinary objects: `open(p, "rb", buffering=0)` and `io.FileIO`
-    // are raw, while `open(p, "rb")`, `io.BytesIO`, `gzip`, `zipfile`, sockets and subprocess
-    // pipes are buffered. Nothing is both, so neither check covers the other.
-    //
-    // The tempting shortcut is `IOBase` and not `TextIOBase`, which would collapse the two into
-    // one. It is wrong: `tempfile.SpooledTemporaryFile` derives from `IOBase` alone, so
-    // `SpooledTemporaryFile(mode="w+")` would be called binary when it reads `str`.
-    if obj.is_instance(text_io_base(py)?)? {
+    // IOBase alone is not binary: SpooledTemporaryFile can be a text stream.
+    if obj.is_instance(TEXT_IO_BASE.import(py, "io", "TextIOBase")?)? {
         return Ok((Payload::Text, "it is an io.TextIOBase"));
     }
-    if obj.is_instance(raw_io_base(py)?)? || obj.is_instance(buffered_io_base(py)?)? {
+    if obj.is_instance(RAW_IO_BASE.import(py, "io", "RawIOBase")?)?
+        || obj.is_instance(BUFFERED_IO_BASE.import(py, "io", "BufferedIOBase")?)?
+    {
         return Ok((
             Payload::Binary,
             "it is an io.RawIOBase or io.BufferedIOBase",
@@ -205,10 +152,12 @@ where
 {
     /// Checks `obj` against the payload kind and capabilities and wraps it.
     ///
-    /// The capability checks are `hasattr`, so a duck-typed object is as acceptable as a real
-    /// file. The payload kind check only *rejects*: an object that is definitely of the wrong kind
-    /// is refused here rather than failing confusingly on the first read, but an object that is
-    /// neither an `io.TextIOBase` nor an `io.RawIOBase`/`io.BufferedIOBase` is taken at its word.
+    /// Requires callable methods, including ones supplied dynamically by `__getattr__`.
+    /// Known opposite-kind I/O classes, closed I/O objects, and explicit capability refusals
+    /// are rejected. Unknown duck-typed payload kinds are accepted.
+    ///
+    /// These are best-effort checks, not proof that later I/O succeeds. Attribute lookup and
+    /// capability queries may run Python code, and the object can change after construction.
     pub fn py_new(obj: Bound<'_, PyAny>) -> Result<Self, Error> {
         Self::check_mode(&obj)?;
         Self::check_capabilities(&obj)?;
@@ -225,13 +174,9 @@ where
 
     /// Wraps `obj` without checking the payload kind, keeping the capability checks.
     ///
-    /// The escape hatch for an object [`classify`] gets wrong. It only uses signals that do not
-    /// lie, so an object of no recognisable kind is accepted rather than refused and this is
-    /// rarely needed — but an object that derives from the wrong half of the `io` hierarchy, or
-    /// reports an `encoding` while dealing in bytes, would be refused, and this is how to say you
-    /// know better.
-    ///
-    /// Nothing here is memory-unsafe. Getting it wrong means the first read or write fails.
+    /// For an object that inherits from the wrong payload hierarchy. This still checks
+    /// callable methods, closed state and capability refusals. Actual read results and write
+    /// counts remain validated; this is not a memory-unsafe operation.
     pub fn py_new_unchecked(obj: Bound<'_, PyAny>) -> Result<Self, Error> {
         Self::check_capabilities(&obj)?;
         Ok(Self {
@@ -277,71 +222,40 @@ where
             })
         };
         let require = |name: &Bound<'_, PyString>, method: &'static str| -> Result<(), Error> {
-            if obj.hasattr(name)? {
-                Ok(())
-            } else {
-                Err(missing(method)?)
+            match obj.getattr(name) {
+                Ok(value) if value.is_callable() => Ok(()),
+                Ok(_) => Err(missing(method)?),
+                Err(err) if err.is_instance_of::<PyAttributeError>(py) => Err(missing(method)?),
+                Err(err) => Err(err.into()),
             }
         };
-        // `io.Reader` and `io.Writer`, new in 3.14. The docs call them protocols decorated with
-        // `@typing.runtime_checkable` and typeshed declares them as such, but the runtime class
-        // is an ABC with a `__subclasshook__`, like `collections.abc.Iterable`.
-        //
-        // The three ways of asking this are nested, not equivalent. `hasattr` is an ordinary
-        // lookup, so `__getattr__` counts. A runtime-checkable protocol uses
-        // `inspect.getattr_static` since 3.12, which sees an attribute put on the instance but
-        // not one conjured by `__getattr__`. `io.Reader`'s `_check_methods` walks the class MRO
-        // and sees neither, making it the narrowest of the three.
-        //
-        // So it is accepted *alongside* `hasattr`, never instead of it: requiring it would turn
-        // away a `__getattr__` reader and an instance-assigned one, both of which work. The only
-        // thing it adds is a class passed to `io.Reader.register(..)`, which declares itself
-        // without having the attribute. Worth having because before 3.14 the standard library had
-        // no runtime answer here at all -- `_typeshed.SupportsRead` is a stubs-only name.
-        let require_protocol = |protocol: Option<&Bound<'_, PyAny>>,
-                                name: &Bound<'_, PyString>,
-                                method: &'static str|
-         -> Result<(), Error> {
-            if obj.hasattr(name)? {
-                return Ok(());
-            }
-            match protocol {
-                // Python 3.14 or newer: an explicit registration counts.
-                Some(protocol) if obj.is_instance(protocol)? => Ok(()),
-                _ => Err(missing(method)?),
-            }
-        };
-        // `io.IOBase` gives every stream a `read`, a `write` and a `seek`, including the ones
-        // that only raise, so `hasattr` cannot tell a reader from a writer: a file opened `"wb"`
-        // has a `read` that raises `UnsupportedOperation`. The hierarchy answers that question
-        // itself, and these are queries rather than operations -- the documentation for
-        // `readable()` is literally "if False, read() will raise OSError".
-        //
-        // Only asked of `io.IOBase` instances, where the ABC defines what they mean. On anything
-        // else they would be arbitrary code, so a duck-typed object is left to fail at the first
-        // real call. `mode` was the other candidate and is worse on every axis: nine of the forty
-        // objects surveyed are `IOBase` with no usable `mode` -- `io.BytesIO`, `io.StringIO`,
-        // `io.TextIOWrapper`, `gzip.open(.., "rt")`, a text subprocess pipe -- where none lack
-        // `readable()`, and it would need parsing `"r"`, `"w"`, `"a"`, `"x"` and `"+"` besides.
-        let refuses = |query: &'static str| -> Result<bool, Error> {
-            if !obj.is_instance(io_base(py)?)? {
-                return Ok(false);
-            }
-            // A raise, or anything that is not a bool, is not an answer.
-            Ok(obj
-                .call_method0(query)
+        let is_io = obj.is_instance(IO_BASE.import(py, "io", "IOBase")?)?;
+        // Only IOBase gives these attributes a defined meaning. Do not inspect unrelated
+        // ducks' state/query attributes. A raise or a non-bool is an unknown answer.
+        if is_io
+            && obj
+                .getattr(intern!(py, "closed"))
                 .ok()
                 .and_then(|answer| answer.extract::<bool>().ok())
-                == Some(false))
-        };
-        let require_capability = |query: &'static str,
+                == Some(true)
+        {
+            return Err(PyValueError::new_err("I/O operation on closed file").into());
+        }
+        let require_capability = |query: &Bound<'_, PyString>,
+                                  query_name: &'static str,
                                   method: &'static str,
                                   capability: &'static str|
          -> Result<(), Error> {
-            if refuses(query)? {
+            if is_io
+                && obj
+                    .call_method0(query)
+                    .ok()
+                    .and_then(|answer| answer.extract::<bool>().ok())
+                    == Some(false)
+            {
                 Err(Error::RefusesCapability {
                     type_name: obj.get_type().name()?.to_string(),
-                    query,
+                    query: query_name,
                     method,
                     capability,
                 })
@@ -351,19 +265,19 @@ where
         };
 
         if READ {
-            require_protocol(io_reader(py)?, intern!(py, "read"), "read")?;
-            require_capability("readable", "read", "READ")?;
+            require(intern!(py, "read"), "read")?;
+            require_capability(intern!(py, "readable"), "readable", "read", "READ")?;
         }
         if WRITE {
-            require_protocol(io_writer(py)?, intern!(py, "write"), "write")?;
-            require_capability("writable", "write", "WRITE")?;
+            require(intern!(py, "write"), "write")?;
+            require_capability(intern!(py, "writable"), "writable", "write", "WRITE")?;
             // `flush` is deliberately not required. An object that has none has nothing to flush,
             // so flushing it is a no-op rather than an error, and demanding it would turn away
             // every minimal writer that implements nothing but `write`.
         }
         if SEEK {
             require(intern!(py, "seek"), "seek")?;
-            require_capability("seekable", "seek", "SEEK")?;
+            require_capability(intern!(py, "seekable"), "seekable", "seek", "SEEK")?;
             if M::IS_TEXT {
                 // Text streams only accept opaque cookies, which come from tell()
                 require(intern!(py, "tell"), "tell")?;
