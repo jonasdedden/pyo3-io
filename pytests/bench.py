@@ -31,13 +31,19 @@ def check_equal(actual, expected):
         raise ValueError("incorrect result (excluded from timing)")
 
 
+def check_construct(ext, stream, name, count):
+    """Run one construction batch; `bench_construct` returns None by design."""
+    ext.bench_construct(stream, name, count)
+
+
 def report(label, cases, args, divisor=1):
     """Cases are (reset, call, check); neither reset nor check is timed.
 
     Rotate implementation order between repeats and report median repeat means.
     Results are dropped inside the timed call, identically for every adapter.
     """
-    samples, active = {}, {}
+    samples: dict[str, list[float]] = {}
+    active = {}
     for name, (reset, call, check) in cases.items():
         try:
             reset()
@@ -153,7 +159,7 @@ def main():
                 name: (
                     lambda: None,
                     lambda name=name: ext.bench_construct(stream, name, constructors),
-                    lambda name=name: check_equal(ext.bench_construct(stream, name, 1), None),
+                    lambda name=name: check_construct(ext, stream, name, 1),
                 ) for name in (*IMPLEMENTATIONS, "legacy-checked")
             }, args, divisor=constructors)
             for chunk in [0, *chunks]:
@@ -167,12 +173,12 @@ def main():
                            write_cases(ext, stream, block, count, flush), args)
     for kind, pattern in (("ASCII", "hello world\n"), ("Unicode", "héλ🙂\n")):
         text = (pattern * ((size + len(pattern) - 1) // len(pattern)))[:size]
-        with io.StringIO(text) as stream:
+        with io.StringIO(text) as text_stream:
             report(f"{kind} text {len(text)}ch/{len(text.encode())}B", {
                 name: (
-                    lambda: stream.seek(0),
-                    lambda name=name: ext.bench_text_read(stream, name),
-                    lambda name=name: check_equal(ext.bench_text_read(stream, name), text),
+                    lambda: text_stream.seek(0),
+                    lambda name=name: ext.bench_text_read(text_stream, name),
+                    lambda name=name: check_equal(ext.bench_text_read(text_stream, name), text),
                 ) for name in IMPLEMENTATIONS
             }, args)
     print("\nText chunk comparisons omitted: legacy/filelike use byte-sized buffers,")

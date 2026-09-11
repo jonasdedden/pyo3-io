@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 import sys
 import tempfile
+from typing import BinaryIO
 
 
 def peak_rss():
@@ -43,6 +44,7 @@ def main():
     install(args.profile)
     import pyo3_typed_io_tests as ext
 
+    stream: BinaryIO
     if args.source == "BytesIO":
         stream = io.BytesIO(b"x" * args.size)
     else:

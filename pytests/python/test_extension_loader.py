@@ -2,6 +2,8 @@
 
 import json
 from pathlib import Path
+import subprocess
+import sys
 
 import pytest
 
@@ -34,9 +36,10 @@ def test_artifact_location(monkeypatch, tmp_path, platform, filename, profile):
     built = target / profile / filename
     built.parent.mkdir(parents=True)
     built.write_bytes(b"artifact")
-    monkeypatch.setattr(_extension.sys, "platform", platform)
+    # `_extension.sys` is the `sys` module itself, so patching it patches the same object.
+    monkeypatch.setattr(sys, "platform", platform)
     monkeypatch.setattr(
-        _extension.subprocess,
+        subprocess,
         "check_output",
         lambda *args, **kwargs: cargo_artifact(built),
     )
@@ -47,7 +50,7 @@ def test_artifact_location(monkeypatch, tmp_path, platform, filename, profile):
 
 def test_missing_artifact_is_an_error(monkeypatch, tmp_path):
     monkeypatch.setattr(
-        _extension.subprocess,
+        subprocess,
         "check_output",
         lambda *args, **kwargs: cargo_artifact(tmp_path / "missing.so"),
     )
@@ -64,17 +67,17 @@ def test_staged_libraries_are_immutable(monkeypatch, tmp_path):
     built = tmp_path / "release/libtest.so"
     built.parent.mkdir()
     monkeypatch.setattr(_extension, "artifact", lambda profile: built)
-    monkeypatch.delitem(_extension.sys.modules, _extension.MODULE, raising=False)
-    monkeypatch.setattr(_extension.sys, "path", list(_extension.sys.path))
+    monkeypatch.delitem(sys.modules, _extension.MODULE, raising=False)
+    monkeypatch.setattr(sys, "path", list(sys.path))
     built.write_bytes(b"original")
     _extension.install("release")
-    original = Path(_extension.sys.path[0])
+    original = Path(sys.path[0])
     original_file = next(original.iterdir())
     original_stat = original_file.stat()
     _extension.install("release")
     assert original_file.stat().st_mtime_ns == original_stat.st_mtime_ns
     built.write_bytes(b"new build")
     _extension.install("release")
-    assert Path(_extension.sys.path[0]) != original
+    assert Path(sys.path[0]) != original
     assert original_file.read_bytes() == b"original"
-    assert next(Path(_extension.sys.path[0]).iterdir()).read_bytes() == b"new build"
+    assert next(Path(sys.path[0]).iterdir()).read_bytes() == b"new build"

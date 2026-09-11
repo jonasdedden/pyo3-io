@@ -26,7 +26,7 @@ def artifact(profile: str | None = None) -> Path:
     if profile == "release":
         command.append("--release")
     output = subprocess.check_output(command, text=True)
-    candidates = []
+    candidates: list[Path] = []
     for line in output.splitlines():
         message = json.loads(line)
         target = message.get("target", {})
@@ -58,7 +58,9 @@ def install(profile: str | None = None) -> Path:
     target = stage / f"{MODULE}{suffix}"
     loaded = sys.modules.get(MODULE)
     if loaded is not None:
-        if Path(loaded.__file__).resolve() != target.resolve():
+        loaded_file = loaded.__file__
+        assert loaded_file is not None, "loaded module has no __file__"
+        if Path(loaded_file).resolve() != target.resolve():
             raise RuntimeError("cannot load two extension build profiles in one Python process")
         return built
     if not target.is_file():
@@ -66,11 +68,11 @@ def install(profile: str | None = None) -> Path:
         # Publish a populated directory atomically. Renaming onto an existing nonempty
         # directory fails on both Unix and Windows, so concurrent processes never truncate
         # or replace a library another process may already have mapped.
-        with tempfile.TemporaryDirectory(dir=staging, prefix=".staging-") as temporary:
-            temporary = Path(temporary)
-            (temporary / target.name).write_bytes(data)
+        with tempfile.TemporaryDirectory(dir=staging, prefix=".staging-") as tmpdir_name:
+            tmpdir = Path(tmpdir_name)
+            (tmpdir / target.name).write_bytes(data)
             try:
-                temporary.rename(stage)
+                tmpdir.rename(stage)
             except OSError:
                 if not target.is_file():
                     raise

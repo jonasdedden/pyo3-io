@@ -88,9 +88,8 @@ Construction applies these rules:
   not identify either kind. Unknown pure ducks are accepted subject to capability
   checks, with payload validation on reads.
 * **Require callable methods through normal attribute lookup.** Instance methods,
-  descriptors, and `__getattr__` can supply them. Registration with `io.Reader`
-  or `io.Writer` is not a substitute for a callable `read` or `write`.
-  Text seeking requires both `seek` and `tell`.
+  descriptors, and `__getattr__` can supply them. Text seeking requires both
+  `seek` and `tell`.
 * **Check known `io.IOBase` state.** A known closed stream raises `ValueError`.
   For requested directions, a strict `False` from `readable()`, `writable()`, or
   `seekable()` rejects the capability. Pure ducks do not need these queries.

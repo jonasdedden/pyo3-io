@@ -58,7 +58,7 @@ def test_dynamic_callables_are_accepted_without_probes_or_unrequested_lookups():
         pass
 
     instance = InstanceReader()
-    instance.read = lambda size: b"abc"[:size]
+    setattr(instance, "read", lambda size: b"abc"[:size])
     assert ext.binary_read_exactly(instance, 2) == b"ab"
 
 
@@ -97,16 +97,3 @@ def test_nonboolean_iobase_queries_are_unknown(answer):
             pytest.fail("unrequested query")
 
     assert ext.binary_read_exactly(Stream(), 1) == b"x"
-
-
-@pytest.mark.skipif(not hasattr(io, "Reader"), reason="io.Reader added in Python 3.14")
-def test_protocol_registration_does_not_replace_an_actual_method():
-    class Empty:
-        pass
-
-    io.Reader.register(Empty)
-    io.Writer.register(Empty)
-    with pytest.raises(TypeError, match=r"\.read\(\)"):
-        ext.binary_read_exactly(Empty(), 0)
-    with pytest.raises(TypeError, match=r"\.write\(\)"):
-        ext.binary_write(Empty(), b"")

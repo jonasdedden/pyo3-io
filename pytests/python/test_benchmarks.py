@@ -79,6 +79,8 @@ class BenchmarkTests(unittest.TestCase):
     def test_incorrect_case_is_not_timed(self):
         path = Path(__file__).resolve().parents[1] / "bench.py"
         spec = importlib.util.spec_from_file_location("benchmark_cli", path)
+        assert spec is not None
+        assert spec.loader is not None
         bench = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(bench)
         calls = []

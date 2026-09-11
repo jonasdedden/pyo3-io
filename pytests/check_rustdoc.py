@@ -65,19 +65,24 @@ class Page(HTMLParser):
         attrs = dict(attrs)
         if "id" in attrs:
             # Rustdoc also percent-encodes some literal impl IDs in the HTML.
-            self.ids.add(unquote(attrs["id"]))
+            # A valueless `id` attribute parses as None; there is nothing to record then.
+            element_id = attrs["id"]
+            assert element_id is not None
+            self.ids.add(unquote(element_id))
         if tag == "main":
             self.main = True
         if tag == "dt":
             self.in_term = True
-        if tag == "meta" and attrs.get("http-equiv", "").lower() == "refresh":
-            match = re.search(r"url\s*=\s*(.+)", attrs.get("content", ""), re.I)
+        if tag == "meta" and (attrs.get("http-equiv") or "").lower() == "refresh":
+            match = re.search(r"url\s*=\s*(.+)", attrs.get("content") or "", re.I)
             if match:
                 self.redirect = match.group(1).strip().strip("'\"")
         if self.main and re.fullmatch(r"h[1-6]", tag):
             self.heading = (int(tag[1]), [])
         if tag == "a" and "href" in attrs:
-            self.links.append((attrs["href"], self.section if self.main else None))
+            href = attrs["href"]
+            assert href is not None, "valueless href attribute"
+            self.links.append((href, self.section if self.main else None))
             # Only catalog entries, not aliases mentioned in their descriptions.
             if self.main and self.in_term and self.section == "Type Aliases":
                 self.alias_links.append(attrs["href"])
@@ -277,6 +282,8 @@ def main():
         None,
     )
     require(host, "rustc -vV did not report a host target")
+    # `require` raises, but the checkers cannot see that; spell out the narrowing.
+    assert host is not None
     cfg = subprocess.check_output(["rustc", "--print", "cfg", "--target", host], cwd=ROOT, text=True)
     unix = "unix" in cfg.splitlines()
     target_parent = ROOT / "target"
