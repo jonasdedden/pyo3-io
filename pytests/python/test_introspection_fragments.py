@@ -2,16 +2,22 @@
 
 import ctypes
 import json
+from typing import Any
 
 import pytest
 
 import pyo3_typed_io_tests as ext
 
-LIBRARY = ctypes.PyDLL(ext.__file__)
-CAPABILITIES = (("Read", 8), ("Write", 4), ("Seek", 2), ("Fileno", 1))
+_EXTENSION_FILE = ext.__file__
+assert _EXTENSION_FILE is not None, "test extension has no __file__"
+LIBRARY = ctypes.PyDLL(_EXTENSION_FILE)
+CAPABILITIES: tuple[tuple[str, int], ...] = (("Read", 8), ("Write", 4), ("Seek", 2), ("Fileno", 1))
+
+#: One expected method: its positional arguments plus its return annotation.
+ExpectedMethod = tuple[list[tuple[str, dict[str, Any]]], dict[str, Any]]
 
 
-def fragment(alias, suffix):
+def fragment(alias: str, suffix: str) -> Any:
     name = f"PYO3_INTROSPECTION_1_PYO3_TYPED_IO_{alias}_{suffix}"
     length = ctypes.c_uint32.in_dll(LIBRARY, name)
     # The encoder's repr(C) layout is a u32 followed immediately by JSON bytes.
@@ -20,14 +26,14 @@ def fragment(alias, suffix):
     return json.loads(data)
 
 
-def hint(name):
+def hint(name: str) -> dict[str, Any]:
     if "." not in name:
         return {"type": "name", "id": name}
     module, attribute = name.rsplit(".", 1)
     return {"type": "attribute", "value": hint(module), "attr": attribute}
 
 
-def nullable(value):
+def nullable(value: dict[str, Any]) -> dict[str, Any]:
     return {
         "type": "binop", "left": value, "op": "bitor",
         "right": {"type": "constant", "kind": "none"},
@@ -36,7 +42,7 @@ def nullable(value):
 
 @pytest.mark.parametrize("kind", ["Binary", "Text"])
 @pytest.mark.parametrize("bits", range(1, 16))
-def test_linked_protocol_matches_its_capabilities(kind, bits):
+def test_linked_protocol_matches_its_capabilities(kind: str, bits: int) -> None:
     alias = kind + "".join(name for name, bit in CAPABILITIES if bits & bit)
     protocol = f"Supports{alias}"
     parent = f"pyo3-typed-io:{protocol}"
@@ -49,7 +55,7 @@ def test_linked_protocol_matches_its_capabilities(kind, bits):
     }
 
     integer = hint("int")
-    methods = {}
+    methods: dict[str, ExpectedMethod] = {}
     if bits & 8:
         payload = "str" if kind == "Text" else "_typeshed.ReadableBuffer"
         methods["read"] = ([("size", integer)], nullable(hint(payload)))

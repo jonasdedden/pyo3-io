@@ -10,7 +10,7 @@ import pytest
 import _extension
 
 
-def cargo_artifact(built):
+def cargo_artifact(built: Path) -> str:
     return json.dumps({
         "reason": "compiler-artifact",
         "target": {
@@ -31,7 +31,9 @@ def cargo_artifact(built):
     ],
 )
 @pytest.mark.parametrize("profile", ["debug", "release"])
-def test_artifact_location(monkeypatch, tmp_path, platform, filename, profile):
+def test_artifact_location(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, platform: str, filename: str, profile: str
+) -> None:
     target = tmp_path / "custom-target" / "configured-native-triple"
     built = target / profile / filename
     built.parent.mkdir(parents=True)
@@ -48,7 +50,7 @@ def test_artifact_location(monkeypatch, tmp_path, platform, filename, profile):
     assert _extension.artifact() == built
 
 
-def test_missing_artifact_is_an_error(monkeypatch, tmp_path):
+def test_missing_artifact_is_an_error(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setattr(
         subprocess,
         "check_output",
@@ -58,12 +60,12 @@ def test_missing_artifact_is_an_error(monkeypatch, tmp_path):
         _extension.artifact("release")
 
 
-def test_unknown_profile_is_rejected():
+def test_unknown_profile_is_rejected() -> None:
     with pytest.raises(ValueError, match="debug or release"):
         _extension.artifact("optimized-ish")
 
 
-def test_staged_libraries_are_immutable(monkeypatch, tmp_path):
+def test_staged_libraries_are_immutable(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     built = tmp_path / "release/libtest.so"
     built.parent.mkdir()
     monkeypatch.setattr(_extension, "artifact", lambda profile: built)

@@ -9,33 +9,33 @@ from types import SimpleNamespace
 
 import pyo3_typed_io_tests as ext
 
-IMPLEMENTATIONS = ("typed-detached", "typed-bound", "legacy", "filelike")
+IMPLEMENTATIONS: tuple[str, ...] = ("typed-detached", "typed-bound", "legacy", "filelike")
 
 
 class ObservedBytesIO(io.BytesIO):
-    def __init__(self, data=b""):
+    def __init__(self, data: bytes = b"") -> None:
         super().__init__(data)
         self.reads = 0
         self.flushes = 0
 
-    def read(self, size=-1):
+    def read(self, size: int | None = -1) -> bytes:
         self.reads += 1
         return super().read(size)
 
-    def flush(self):
+    def flush(self) -> None:
         self.flushes += 1
         return super().flush()
 
 
 class BenchmarkTests(unittest.TestCase):
-    def test_construction_does_not_read(self):
+    def test_construction_does_not_read(self) -> None:
         for implementation in (*IMPLEMENTATIONS, "legacy-checked"):
             stream = ObservedBytesIO(b"abc")
             ext.bench_construct(stream, implementation, 3)
             self.assertEqual(stream.reads, 0)
             self.assertEqual(stream.tell(), 0)
 
-    def test_binary_content_and_count(self):
+    def test_binary_content_and_count(self) -> None:
         data = bytes(range(256)) * 17
         for implementation in IMPLEMENTATIONS:
             for chunk in (0, 1, 37, 4096):
@@ -49,7 +49,7 @@ class BenchmarkTests(unittest.TestCase):
                         (len(data), None),
                     )
 
-    def test_write_repetition_and_flush(self):
+    def test_write_repetition_and_flush(self) -> None:
         for implementation in IMPLEMENTATIONS:
             for flush in (False, True):
                 stream = ObservedBytesIO()
@@ -57,12 +57,12 @@ class BenchmarkTests(unittest.TestCase):
                 self.assertEqual(stream.getvalue(), b"\x00\xff" * 7)
                 self.assertEqual(stream.flushes, int(flush))
 
-    def test_typed_unicode_whole_stream(self):
+    def test_typed_unicode_whole_stream(self) -> None:
         text = "héλ🙂" * 4000
         for implementation in IMPLEMENTATIONS[:2]:
             self.assertEqual(ext.bench_text_read(io.StringIO(text), implementation), text)
 
-    def test_invalid_parameters(self):
+    def test_invalid_parameters(self) -> None:
         for call in (
             lambda: ext.bench_construct(io.BytesIO(), "typed-bound", 0),
             lambda: ext.bench_construct(io.BytesIO(), "unknown", 1),
@@ -76,7 +76,7 @@ class BenchmarkTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 call()
 
-    def test_incorrect_case_is_not_timed(self):
+    def test_incorrect_case_is_not_timed(self) -> None:
         path = Path(__file__).resolve().parents[1] / "bench.py"
         spec = importlib.util.spec_from_file_location("benchmark_cli", path)
         assert spec is not None
