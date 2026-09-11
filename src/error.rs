@@ -62,6 +62,15 @@ pub enum Error {
         asked: usize,
     },
 
+    /// A text `read` returned more Unicode characters than requested.
+    #[error("read() returned {got} characters after being asked for at most {asked}")]
+    OverlongTextRead {
+        /// The number of Unicode characters returned.
+        got: usize,
+        /// The requested maximum number of characters.
+        asked: usize,
+    },
+
     /// `write` claimed to have consumed more than it was given.
     #[error("write() reported {reported} {unit} written of {available}")]
     ImpossibleWriteCount {
@@ -173,6 +182,7 @@ impl From<Error> for io::Error {
             Error::WouldBlock { .. } => io::ErrorKind::WouldBlock,
             Error::WrongPayload { .. }
             | Error::OverlongRead { .. }
+            | Error::OverlongTextRead { .. }
             | Error::ImpossibleWriteCount { .. } => io::ErrorKind::InvalidData,
             Error::WroteNothing { .. } => io::ErrorKind::WriteZero,
             Error::OutOfRange { .. } => io::ErrorKind::InvalidInput,

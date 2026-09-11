@@ -86,7 +86,7 @@ fn binary_fileno_via_as_raw_fd(file: BinaryFileno) -> PyResult<i32> {
 
 // ---------------------------------------------------------------- text
 
-/// Reads the whole stream as text. One `read(-1)` and one `str` across the boundary.
+/// Reads the whole stream as text using bounded character reads.
 #[pyfunction]
 fn text_read_all(mut file: TextRead) -> PyResult<String> {
     Ok(file.read_to_string()?)
@@ -116,7 +116,7 @@ fn text_read_write(mut file: TextReadWrite, text: &str) -> PyResult<usize> {
 fn text_seek_roundtrip(mut file: TextReadSeek, n: usize) -> PyResult<(String, String)> {
     let cookie = file.tell()?;
     let first = file.read_chars(n)?;
-    file.seek_to(cookie)?;
+    file.seek_to(&cookie)?;
     let again = file.read_chars(n)?;
     Ok((first, again))
 }

@@ -49,10 +49,15 @@ class TestReadAll:
         with open(path, encoding="latin-1") as handle:
             assert ext.text_read_all(handle) == "éèü"
 
-    def test_read_to_string_is_one_call(self):
-        reader = DuckTextReader(ASCII * 1000)
-        ext.text_read_all(reader)
-        assert reader.calls == 2
+    def test_read_to_string_supports_positive_size_only(self):
+        class PositiveReader(DuckTextReader):
+            def read(self, size, /):
+                assert size > 0
+                return super().read(size)
+
+        text = ASCII * 1000
+        reader = PositiveReader(text)
+        assert ext.text_read_all(reader) == text
 
     def test_newlines_are_not_mangled(self):
         text = "a\nb\nc\n"

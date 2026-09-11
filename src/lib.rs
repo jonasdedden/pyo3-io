@@ -17,6 +17,7 @@ mod text;
 
 pub use error::Error;
 pub use mode::{Binary, Mode, Text};
+pub use text::TextPosition;
 
 mod sealed {
     pub trait Sealed {}

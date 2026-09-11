@@ -47,10 +47,10 @@ fn text_files_have_the_character_api() {
         let _: std::io::Result<usize> = write.write_str("x");
         let _: std::io::Result<()> = write.write_all_str("x");
         let _: std::io::Result<()> = write.flush();
-        let _: std::io::Result<u64> = seek.tell();
-        let _: std::io::Result<u64> = seek.seek_to(0);
-        let _: std::io::Result<u64> = seek.rewind();
-        let _: std::io::Result<u64> = seek.seek_to_end();
+        let cookie: TextPosition = seek.tell().unwrap();
+        let _: std::io::Result<TextPosition> = seek.seek_to(&cookie);
+        let _: std::io::Result<TextPosition> = seek.rewind();
+        let _: std::io::Result<TextPosition> = seek.seek_to_end();
     }
 }
 
@@ -169,7 +169,7 @@ fn the_bound_form_mirrors_the_detached_one() {
     #[allow(dead_code)]
     fn text_api(mut read: BoundTextRead<'_>, mut seek: BoundTextReadSeek<'_>) {
         let _: std::io::Result<String> = read.read_chars(4);
-        let _: std::io::Result<u64> = seek.tell();
+        let _: std::io::Result<TextPosition> = seek.tell();
     }
 
     // `BoundFile` borrows the token, so it is deliberately neither `Send` nor `'static`; that is
