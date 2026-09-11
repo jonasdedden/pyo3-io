@@ -333,13 +333,14 @@ class TestDuckTypingIsTheFallback:
             ext.text_read_chars(SilentlyBinary(), 4)
 
 
-class TestTheEscapeHatch:
-    """`Unchecked` skips the payload-kind check and keeps the capability checks.
+class TestMisleadingInheritance:
+    """An object deriving from the wrong half of the `io` hierarchy is refused, full stop.
 
-    Rarely needed now that only trustworthy signals are used: an object of no recognisable kind is
-    accepted rather than refused. What is left is an object that positively misidentifies itself,
-    which takes deriving from the wrong half of the `io` hierarchy or reporting an `encoding`
-    while dealing in bytes.
+    There is deliberately no escape hatch: inheriting from `io.RawIOBase` while dealing in
+    `str` contradicts the base's own contract (typeshed types its `write` as bytes-only),
+    so a checker flags it at the class definition. If the class is yours, fix the base;
+    if it is someone else's, wrap it instead of inheriting — a plain delegating object
+    is taken at its word.
     """
 
     def test_an_object_with_its_own_encoding_attribute_is_left_alone(self):
@@ -354,9 +355,8 @@ class TestTheEscapeHatch:
 
         assert ext.binary_read_exactly(BinaryThatKeepsAnEncoding(), 4) == BYTES[:4]
 
-    def test_the_escape_hatch_handles_a_structurally_misleading_object(self, files):
-        """Deriving from the binary half of `io` while dealing in str. Nothing structural can
-        catch that, and nothing is called on the object to find out, so this is the way past."""
+    def test_a_structurally_misleading_object_is_refused(self):
+        """Deriving from the binary half of `io` while dealing in str."""
 
         class TextWriterInBinaryClothing(io.RawIOBase):
             def __init__(self):
@@ -372,14 +372,33 @@ class TestTheEscapeHatch:
         with pytest.raises(TypeError, match="io.RawIOBase"):
             ext.text_write(TextWriterInBinaryClothing(), TEXT)
 
-    def test_the_escape_hatch_still_checks_capabilities(self):
-        with pytest.raises(TypeError, match=r"has no \.read\(\) method"):
-            ext.text_read_all_unchecked(object())
+    def test_wrapping_instead_of_inheriting_is_accepted(self):
+        """The recipe for a misclassified class that cannot be fixed: delegate, don't inherit."""
 
-    def test_the_escape_hatch_keeps_its_annotation(self, stub_source):
-        """`Unchecked<TextRead>` carries the same protocol as `TextRead`, so reaching for it does
-        not cost the signature."""
-        assert "def text_read_all_unchecked(file: SupportsTextRead) -> str" in stub_source
+        class ThirdPartyWriter(io.RawIOBase):
+            def __init__(self):
+                self.written = ""
+
+            def writable(self):
+                return True
+
+            def write(self, data, /):
+                self.written += data
+                return len(data)
+
+        class TextShim:
+            def __init__(self, inner):
+                self._inner = inner
+
+            def write(self, data, /):
+                return self._inner.write(data)
+
+            def flush(self):
+                pass
+
+        inner = ThirdPartyWriter()
+        assert ext.text_write(TextShim(inner), TEXT) == len(TEXT)
+        assert inner.written == TEXT
 
     def test_no_signal_reaches_the_type_stubs(self, stub_source):
         """Classification is a runtime concern. The protocols come from the Rust type, so nothing

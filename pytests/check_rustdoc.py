@@ -23,7 +23,7 @@ COMMON = {
     "BinaryRead", "BinaryWrite", "BinaryReadSeek",
     "TextRead", "TextWrite", "TextReadSeek",
 }
-CONSTRUCTORS = {"new", "py_new", "py_new_unchecked"}
+CONSTRUCTORS = {"new", "py_new"}
 OWNED_COMMON = CONSTRUCTORS | {"bind", "into_bound", "as_py_object", "into_py_object"}
 BOUND_COMMON = {"as_py_object", "unbind"}
 TEXT = {

@@ -180,11 +180,6 @@ def text_read_all(file: SupportsTextRead) -> str:
     Reads the whole stream as text using bounded character reads.
     """
 
-def text_read_all_unchecked(file: SupportsTextRead) -> str:
-    """
-    Uses the escape hatch: no payload-kind check, capability checks kept.
-    """
-
 def text_read_chars(file: SupportsTextRead, n: int) -> str:
     """
     Reads at most `n` **characters**, the unit Python counts a text read in.

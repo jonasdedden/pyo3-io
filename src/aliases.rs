@@ -125,8 +125,7 @@ macro_rules! define_aliases {
         $(
             #[doc = concat!("An owned `", stringify!($mode), "` stream requiring `", stringify!($($capability),*), "`.")]
             #[doc = "\n# Available operations\n\n\
-                - **Construction:** [`new`](crate::PyFile::new), [`py_new`](crate::PyFile::py_new), \
-                  [`py_new_unchecked`](crate::PyFile::py_new_unchecked).\n\
+                - **Construction:** [`new`](crate::PyFile::new), [`py_new`](crate::PyFile::py_new).\n\
                 - **Binding:** [`bind`](crate::PyFile::bind), [`into_bound`](crate::PyFile::into_bound).\n\
                 - **Object access:** [`as_py_object`](crate::PyFile::as_py_object), \
                   [`into_py_object`](crate::PyFile::into_py_object).\n\

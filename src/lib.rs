@@ -223,19 +223,6 @@ where
         Python::attach(|py| Self::py_new(obj.into_bound(py)))
     }
 
-    /// Wraps `obj` without checking the payload kind, keeping the capability checks.
-    ///
-    /// For an object that inherits from the wrong payload hierarchy. This still checks
-    /// callable methods, closed state and capability refusals. Actual read results and write
-    /// counts remain validated; this is not a memory-unsafe operation.
-    pub fn py_new_unchecked(obj: Bound<'_, PyAny>) -> Result<Self, Error> {
-        Self::check_capabilities(&obj)?;
-        Ok(Self {
-            obj: obj.unbind(),
-            mode: PhantomData,
-        })
-    }
-
     fn check_mode(obj: &Bound<'_, PyAny>) -> Result<(), Error> {
         let (payload, why) = classify(obj)?;
         let wrong = match (M::IS_TEXT, payload) {
@@ -477,66 +464,6 @@ where
                 .extract::<i32>()?)
         })()
         .map_err(Into::into)
-    }
-}
-
-/// A [`PyFile`] extracted without the payload-kind check, keeping the capability checks.
-///
-/// The escape hatch for an object that misidentifies itself, in a form that can still appear in a
-/// `#[pyfunction]` signature — it carries the same type stub protocol as the file it wraps, so
-/// using it costs nothing in the annotation:
-///
-/// ```rust,no_run
-/// use pyo3::prelude::*;
-/// use pyo3_typed_io::{TextRead, Unchecked};
-///
-/// #[pyfunction]
-/// fn read_it(mut source: Unchecked<TextRead>) -> PyResult<String> {
-///     Ok(source.read_to_string()?)
-/// }
-/// // def read_it(source: SupportsTextRead) -> str: ...
-/// ```
-///
-/// See [`PyFile::py_new_unchecked`] for when that is needed.
-#[derive(Debug, Clone)]
-pub struct Unchecked<T>(T);
-
-impl<T> Unchecked<T> {
-    /// The file underneath.
-    pub fn into_inner(self) -> T {
-        self.0
-    }
-}
-
-impl<T> core::ops::Deref for Unchecked<T> {
-    type Target = T;
-
-    fn deref(&self) -> &T {
-        &self.0
-    }
-}
-
-impl<T> core::ops::DerefMut for Unchecked<T> {
-    fn deref_mut(&mut self) -> &mut T {
-        &mut self.0
-    }
-}
-
-impl<'py, M, const READ: bool, const WRITE: bool, const SEEK: bool, const FILENO: bool>
-    FromPyObject<'_, 'py> for Unchecked<PyFile<M, READ, WRITE, SEEK, FILENO>>
-where
-    M: Mode,
-{
-    type Error = PyErr;
-
-    // Deliberately the same protocol as the checked form: skipping the runtime check says nothing
-    // about what the object has to provide.
-    #[cfg(feature = "experimental-inspect")]
-    const INPUT_TYPE: pyo3::inspect::PyStaticExpr =
-        introspection::protocol_hint(M::IS_TEXT, READ, WRITE, SEEK, FILENO);
-
-    fn extract(obj: Borrowed<'_, 'py, PyAny>) -> Result<Self, Self::Error> {
-        Ok(Self(PyFile::py_new_unchecked(obj.as_any().clone())?))
     }
 }
 

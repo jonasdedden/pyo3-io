@@ -100,9 +100,11 @@ Python code through lookup, hierarchy checks, and state queries; it is not
 side-effect-free. Missing/noncallable methods, known wrong kinds, and refused
 capabilities become Python `TypeError`s.
 
-`py_new_unchecked` and the `Unchecked<T>` argument adapter skip only payload-kind
-classification, not capability checks or runtime payload/count validation. They
-are safe escape hatches for misleading inheritance, not unchecked memory access.
+There is deliberately no way to skip payload-kind classification. A class deriving
+from the wrong half of the `io` hierarchy (e.g. an `io.RawIOBase` subclass dealing
+in `str`) contradicts its base's own contract, so if the class is yours, fix the
+base; if it is someone else's, wrap it in a plain delegating object instead of
+inheriting, which is taken at its word.
 
 Choose encoding on the Python side: open a binary stream when Rust needs original
 bytes, or wrap it with `io.TextIOWrapper(..., encoding=...)` when Rust needs text.

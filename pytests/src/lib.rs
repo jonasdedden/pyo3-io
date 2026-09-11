@@ -5,7 +5,7 @@ use pyo3::prelude::*;
 use pyo3::types::PyBytes;
 use pyo3_typed_io::{
     BinaryFileno, BinaryRead, BinaryReadSeek, BinaryReadWrite, BinaryReadWriteSeekFileno,
-    BinaryWrite, TextFileno, TextRead, TextReadSeek, TextReadWrite, TextWrite, Unchecked,
+    BinaryWrite, TextFileno, TextRead, TextReadSeek, TextReadWrite, TextWrite,
 };
 use std::io::{Read, Seek, SeekFrom, Write};
 
@@ -226,12 +226,6 @@ fn binary_read_all_bound(py: Python<'_>, file: BinaryRead) -> PyResult<Py<PyByte
     Ok(PyBytes::new(py, &buffer).unbind())
 }
 
-/// Uses the escape hatch: no payload-kind check, capability checks kept.
-#[pyfunction]
-fn text_read_all_unchecked(mut file: Unchecked<TextRead>) -> PyResult<String> {
-    Ok(file.read_to_string()?)
-}
-
 // ------------------------------------------------- pyo3-filelike, for comparison
 
 /// `pyo3-filelike` splits binary and text into two types, so this is the closest equivalent of
@@ -311,7 +305,7 @@ mod pyo3_typed_io_tests {
         binary_write, filelike_fileno, filelike_read_all, filelike_read_once,
         filelike_text_as_bytes, filelike_text_read_all, filelike_write, legacy_fileno,
         legacy_read_all, legacy_read_all_text, legacy_read_chars, legacy_read_once, legacy_write,
-        read_on_another_thread, text_fileno, text_read_all, text_read_all_unchecked,
-        text_read_chars, text_read_write, text_seek_roundtrip, text_write,
+        read_on_another_thread, text_fileno, text_read_all, text_read_chars, text_read_write,
+        text_seek_roundtrip, text_write,
     };
 }
