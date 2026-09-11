@@ -176,12 +176,7 @@ fn the_bound_form_mirrors_the_detached_one() {
     // the whole reason `PyFile` exists alongside it. See `tests/ui/bound_file_is_not_send.rs`.
 }
 
-/// `AsFd` and `AsRawFd`, which is how the rest of the ecosystem takes a descriptor.
-///
-/// `rustix`, `nix`, `memmap2` and `std` all bound on `impl AsFd`, so a file that asked for the
-/// `FILENO` capability can be handed to any of them. They panic where
-/// [`PyFile::fileno`](pyo3_file_typed::PyFile::fileno) returns an error, because the traits have
-/// no way to report one and `fileno()` raising is normal in Python — `io.BytesIO` always does.
+/// Borrowing the Python object's descriptor is not sound; an owned duplicate supports `AsFd`.
 #[test]
 #[cfg(unix)]
 fn files_with_fileno_can_be_given_to_descriptor_apis() {
@@ -193,14 +188,14 @@ fn files_with_fileno_can_be_given_to_descriptor_apis() {
 
     #[allow(dead_code)]
     fn uses(binary: BinaryFileno, text: TextFileno, both: BinaryReadWriteSeekFileno) {
-        takes_fd(&binary); // `AsFd` has a blanket impl for references; `AsRawFd` has not
+        takes_fd(binary.try_clone_fd().unwrap());
         takes_raw_fd(text);
-        takes_owned_fd(both);
+        takes_owned_fd(both.try_clone_fd().unwrap());
     }
 
     #[allow(dead_code)]
     fn bound(file: BoundBinaryFileno<'_>) {
-        takes_fd(&file);
+        takes_fd(file.try_clone_fd().unwrap());
         takes_raw_fd(file);
     }
 }

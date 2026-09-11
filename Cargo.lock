@@ -112,6 +112,7 @@ dependencies = [
 name = "pyo3-file-typed"
 version = "0.1.0"
 dependencies = [
+ "libc",
  "pyo3",
  "pyo3-filelike",
  "thiserror",

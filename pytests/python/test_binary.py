@@ -228,20 +228,15 @@ class TestBoundAndDetachedForms:
 
 
 class TestDescriptorTraits:
-    """`AsFd`/`AsRawFd`, which is how the ecosystem takes a descriptor.
+    """Raw descriptor compatibility has no borrowed-lifetime guarantee and can panic."""
 
-    They cannot report failure, so they panic where `fileno()` returns an error. That is the same
-    exposure `pyo3-file` and `pyo3-filelike` have, except that here the fallible `fileno()` is the
-    documented form and the traits are the compatibility layer on top.
-    """
-
-    def test_as_fd_gives_the_same_descriptor(self, tmp_binary):
+    def test_as_raw_fd_gives_the_same_descriptor(self, tmp_binary):
         with open(tmp_binary, "rb") as handle:
-            assert ext.binary_fileno_via_as_fd(handle) == handle.fileno()
+            assert ext.binary_fileno_via_as_raw_fd(handle) == handle.fileno()
 
-    def test_as_fd_panics_where_fileno_errors(self):
+    def test_as_raw_fd_panics_where_fileno_errors(self):
         with pytest.raises(BaseException) as excinfo:
-            ext.binary_fileno_via_as_fd(io.BytesIO(b"abc"))
+            ext.binary_fileno_via_as_raw_fd(io.BytesIO(b"abc"))
         assert "Panic" in type(excinfo.value).__name__
         assert "use PyFile::fileno for the fallible form" in str(excinfo.value)
 

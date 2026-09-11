@@ -16,6 +16,9 @@ experimental-inspect = ["pyo3/experimental-inspect"]
 pyo3 = "0.29.2"
 thiserror = "2"
 
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
 [dev-dependencies]
 trybuild = "1.0"
 # Only for tests/comparison.rs, which checks the claims the README makes about it.
