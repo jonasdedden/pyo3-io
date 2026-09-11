@@ -53,6 +53,8 @@ impl<const WRITE: bool, const SEEK: bool, const FILENO: bool>
     /// Reads the rest of the stream.
     ///
     /// Uses bounded positive-size reads until EOF, retrying interrupted reads.
+    /// On error, already-consumed text is not returned. For nonblocking streams, use
+    /// [`read_chars`](Self::read_chars) and retain each successful chunk before retrying.
     pub fn read_to_string(&mut self) -> io::Result<String> {
         let mut out = String::new();
         loop {

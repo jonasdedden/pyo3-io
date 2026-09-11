@@ -65,7 +65,7 @@ fn fileno_exists_exactly_where_it_was_asked_for() {
 
 #[test]
 fn all_thirty_aliases_exist() {
-    // One mention of each, so a rename or a gap in the generator is caught here.
+    // One mention of each, so a rename or a gap in the alias table is caught here.
     fn exists<T>() {}
     exists::<BinaryRead>();
     exists::<BinaryWrite>();
@@ -116,14 +116,7 @@ fn writable_files_are_io_write_regardless_of_flush() {
     assert_write::<BinaryReadWrite>();
 }
 
-/// Why the `std::io` implementations attach per call instead of being written against a
-/// GIL-bound sibling type.
-///
-/// Attaching costs 2.5 ns when the GIL is already held, which is 0.07% to 0.6% of a real read.
-/// What it buys is this: a `PyFile` owns a `Py<PyAny>` rather than borrowing a `Bound<'py, _>`, so
-/// it is `Send`, `'static`, and usable by code that has never heard of Python. A GIL-bound form
-/// could not be handed to any of these, because the `'py` lifetime would have to be threaded
-/// through an API that has no place for it.
+/// Detached wrappers can be handed to ordinary owned-I/O consumers without a Python lifetime.
 #[test]
 fn files_can_be_given_to_consumers_that_know_nothing_about_python() {
     fn takes_owned_reader<R: Read + Send + 'static>(_reader: R) {}

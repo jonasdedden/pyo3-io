@@ -140,7 +140,7 @@ class TestNoCapabilityTyping:
 
 
 class TestAnnotationQuality:
-    """Neither neighbour implements `FromPyObject`, so neither can appear in a signature."""
+    """Comparison helpers explicitly accept PyAny; the typed helpers declare their requirements."""
 
     def test_pyo3_filelike_entry_points_are_any(self, stub_source):
         for name in ("filelike_read_all", "filelike_read_once", "filelike_fileno"):

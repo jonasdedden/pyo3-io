@@ -2,8 +2,6 @@
 
 import io
 import os
-import os
-import tempfile
 
 import pytest
 from helpers import (

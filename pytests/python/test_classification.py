@@ -250,7 +250,7 @@ class TestFallsBackToDuckTyping:
     def test_using_one_in_the_wrong_kind_is_caught_at_the_first_read(self, files):
         """Not at the boundary, which is the price of not touching the object to find out."""
         handle = duck_typed_factories(files)["SpooledTemporaryFile wb+"]()
-        with pytest.raises(OSError, match="did not return str.*taken at its word"):
+        with pytest.raises(OSError, match="did not return str.*use a binary wrapper"):
             ext.text_read_chars(handle, 4)
 
 
@@ -321,7 +321,7 @@ class TestDuckTypingIsTheFallback:
             def read(self, size=-1, /) -> str:
                 return TEXT[:size] if size is not None and size >= 0 else TEXT
 
-        with pytest.raises(OSError, match="did not return bytes.*taken at its word"):
+        with pytest.raises(OSError, match="did not return bytes.*use a text wrapper"):
             ext.binary_read_exactly(SilentlyText(), 4)
 
     def test_the_reverse_too(self):
@@ -329,7 +329,7 @@ class TestDuckTypingIsTheFallback:
             def read(self, size=-1, /) -> bytes:
                 return BYTES[:size] if size is not None and size >= 0 else BYTES
 
-        with pytest.raises(OSError, match="did not return str.*taken at its word"):
+        with pytest.raises(OSError, match="did not return str.*use a binary wrapper"):
             ext.text_read_chars(SilentlyBinary(), 4)
 
 

@@ -323,9 +323,8 @@ where
 {
     /// The object's file descriptor.
     ///
-    /// Deliberately fallible and deliberately not [`std::os::fd::AsRawFd`]: `fileno()` raising
-    /// `io.UnsupportedOperation` is entirely normal in Python — `io.BytesIO` does it — and
-    /// `AsRawFd` has no way to report that other than by panicking.
+    /// Unlike the Unix `AsRawFd` compatibility trait, this reports Python failures rather
+    /// than panicking. A number is not a borrowed-descriptor lifetime guarantee.
     pub fn fileno(&self) -> std::io::Result<i32> {
         Python::attach(|py| self.bind(py).fileno())
     }
@@ -341,7 +340,11 @@ where
 /// directly, and on the detached form by attaching and delegating here — so a caller that already
 /// holds the GIL can say so and keep control of when it is taken:
 ///
-/// ```rust,ignore
+/// ```rust,no_run
+/// use pyo3::prelude::*;
+/// use pyo3_file_typed::BinaryRead;
+/// use std::io::Read;
+///
 /// #[pyfunction]
 /// fn count(py: Python<'_>, file: BinaryRead) -> PyResult<usize> {
 ///     let mut file = file.into_bound(py);   // no attaching per read from here on
@@ -431,9 +434,14 @@ where
 /// `#[pyfunction]` signature — it carries the same type stub protocol as the file it wraps, so
 /// using it costs nothing in the annotation:
 ///
-/// ```rust,ignore
+/// ```rust,no_run
+/// use pyo3::prelude::*;
+/// use pyo3_file_typed::{TextRead, Unchecked};
+///
 /// #[pyfunction]
-/// fn read_it(source: Unchecked<TextRead>) -> PyResult<String> { .. }
+/// fn read_it(mut source: Unchecked<TextRead>) -> PyResult<String> {
+///     Ok(source.read_to_string()?)
+/// }
 /// // def read_it(source: SupportsTextRead) -> str: ...
 /// ```
 ///

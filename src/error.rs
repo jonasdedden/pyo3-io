@@ -30,15 +30,14 @@ pub enum Error {
         done: &'static str,
     },
 
-    /// The object deals in the other payload after all.
+    /// The actual read result cannot be converted to the requested payload.
     ///
-    /// Only reachable for an object that identified itself as neither kind, which is what keeps
-    /// duck typing working; see the crate documentation.
+    /// This can occur even after successful classification, for example if a Python text
+    /// stream returns surrogate code points that are not representable in Rust UTF-8.
     #[error(
-        "read() did not return {expected} ({source}). This is a {kind} file-like object, and the \
-         object did not identify itself as {other}, so it was taken at its word. If it deals in \
-         {other_payload}, ask for it as a {other} PyFile, or wrap it with io.TextIOWrapper on the \
-         Python side."
+        "read() did not return {expected} usable by a {kind} stream ({source}). \
+         If it returns {other_payload}, use a {other} wrapper instead. Binary results must \
+         expose a readable buffer; text must be representable as UTF-8."
     )]
     WrongPayload {
         /// What the read should have produced, e.g. `bytes`.
@@ -89,7 +88,7 @@ pub enum Error {
         unit: &'static str,
     },
 
-    /// A count or position that does not fit in the `int` Python is going to be handed.
+    /// A count or byte offset outside this Rust API's supported range.
     #[error("{what} out of range")]
     OutOfRange {
         /// What was out of range.
@@ -98,12 +97,10 @@ pub enum Error {
 
     /// The object has the method but says it will refuse to do it.
     ///
-    /// `io.IOBase` defines `readable()`, `writable()` and `seekable()` as queries with exactly
-    /// this meaning: if one is false, the corresponding call raises. Every stream in the
-    /// hierarchy inherits the methods, including the ones that do not implement the operation, so
-    /// this is the only check that can tell a reader from a writer.
+    /// The corresponding `io.IOBase` query returned `False`. This checks the object's declared
+    /// contract; a subclass can still implement an operation contrary to that declaration.
     #[error(
-        "object of type {type_name} reports {query}() is False, so .{method}() would raise. \
+        "object of type {type_name} reports {query}() is False for .{method}(). \
          It was extracted as a file with the {capability} capability."
     )]
     RefusesCapability {
@@ -191,13 +188,11 @@ impl From<Error> for io::Error {
             | Error::WrongKind { .. } => io::ErrorKind::InvalidInput,
             // `pyo3` already maps the OS-shaped exceptions, including BlockingIOError, so a
             // stream that raises rather than returning None lands on the same kind.
-            Error::Python(_) => {
-                let Error::Python(err) = err else {
-                    unreachable!()
-                };
-                return err.into();
-            }
+            Error::Python(_) => io::ErrorKind::Other,
         };
+        if let Error::Python(err) = err {
+            return err.into();
+        }
         io::Error::new(kind, err)
     }
 }

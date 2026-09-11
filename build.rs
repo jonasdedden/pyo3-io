@@ -228,7 +228,7 @@ fn main() {
         protocols,
         r#"/// The protocol describing what a `PyFile` needs from the object it wraps.
 ///
-/// Asking for no capabilities accepts anything, so it maps to `typing.Any`.
+/// With no required methods there is no useful structural protocol, so use `typing.Any`.
 pub(crate) const fn protocol_hint(
     text: bool,
     read: bool,
