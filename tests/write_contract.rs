@@ -2,7 +2,7 @@
 
 use pyo3::prelude::*;
 use pyo3::types::PyModule;
-use pyo3_typed_io::{BinaryWrite, TextWrite};
+use pyo3_typed_io::{PyBinaryWrite, PyTextWrite};
 use std::ffi::CString;
 use std::io::{ErrorKind, Write};
 
@@ -30,7 +30,7 @@ raw = Raw()
 stream = io.BufferedWriter(raw, buffer_size=4)
 "#,
         );
-        let mut file = BinaryWrite::py_new(module.getattr("stream").unwrap()).unwrap();
+        let mut file = PyBinaryWrite::py_new(module.getattr("stream").unwrap()).unwrap();
         assert_eq!(file.write(b"abcdef").unwrap(), 4);
         assert_eq!(file.write(b"ef").unwrap_err().kind(), ErrorKind::WouldBlock);
         module
@@ -73,7 +73,7 @@ stream = Stream()
 "#,
         );
         let object = module.getattr("stream").unwrap();
-        let mut file = TextWrite::py_new(object.clone()).unwrap();
+        let mut file = PyTextWrite::py_new(object.clone()).unwrap();
         file.write_all_str("é🦀").unwrap();
         assert_eq!(
             object.getattr("data").unwrap().extract::<String>().unwrap(),
@@ -96,7 +96,7 @@ fn blocking_counts_are_checked_and_missing_progress_stays_would_block() {
             ));
             let object = module.getattr("stream").unwrap();
             assert_eq!(
-                BinaryWrite::py_new(object.clone())
+                PyBinaryWrite::py_new(object.clone())
                     .unwrap()
                     .write(b"x")
                     .unwrap_err()
@@ -104,7 +104,7 @@ fn blocking_counts_are_checked_and_missing_progress_stays_would_block() {
                 expected
             );
             assert_eq!(
-                TextWrite::py_new(object)
+                PyTextWrite::py_new(object)
                     .unwrap()
                     .write_str("é")
                     .unwrap_err()
@@ -117,11 +117,11 @@ fn blocking_counts_are_checked_and_missing_progress_stays_would_block() {
                 "class Stream:\n def write(self, data):\n  err = BlockingIOError(11, 'blocked')\n  err.characters_written = {count}\n  raise err\nstream = Stream()"
             ));
             let object = module.getattr("stream").unwrap();
-            assert!(BinaryWrite::py_new(object.clone())
+            assert!(PyBinaryWrite::py_new(object.clone())
                 .unwrap()
                 .write(b"x")
                 .is_err());
-            assert!(TextWrite::py_new(object).unwrap().write_str("é").is_err());
+            assert!(PyTextWrite::py_new(object).unwrap().write_str("é").is_err());
         }
     });
 }

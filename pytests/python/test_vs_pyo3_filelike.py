@@ -140,7 +140,7 @@ class TestNoCapabilityTyping:
         assert "write" in str(excinfo.value)
 
     def test_typed_cannot_express_the_mistake(self) -> None:
-        """`BinaryRead` is `Read` and nothing else; see tests/ui/write_on_read_only.rs."""
+        """`PyBinaryRead` is `Read` and nothing else; see tests/ui/write_on_read_only.rs."""
         assert not hasattr(ext, "binary_write_to_a_reader")
 
 

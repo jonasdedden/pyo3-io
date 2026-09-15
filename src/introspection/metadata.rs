@@ -39,8 +39,8 @@ impl Chunk {
         }
     }
 
-    const fn encode<const N: usize>(self) -> Writer<N> {
-        let mut writer = Writer {
+    const fn encode<const N: usize>(self) -> JsonWriter<N> {
+        let mut writer = JsonWriter {
             bytes: [0; N],
             position: 0,
         };
@@ -84,12 +84,12 @@ impl Chunk {
 }
 
 /// Zero capacity counts bytes; any nonzero capacity writes the same encoding.
-struct Writer<const N: usize> {
+struct JsonWriter<const N: usize> {
     bytes: [u8; N],
     position: usize,
 }
 
-impl<const N: usize> Writer<N> {
+impl<const N: usize> JsonWriter<N> {
     const fn raw(&mut self, text: &str) {
         if N != 0 {
             let mut i = 0;

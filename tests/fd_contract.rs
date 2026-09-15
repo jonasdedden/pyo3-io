@@ -3,7 +3,7 @@
 
 use pyo3::prelude::*;
 use pyo3::types::PyModule;
-use pyo3_typed_io::BinaryFileno;
+use pyo3_typed_io::PyBinaryFileno;
 use std::io::Read;
 use std::os::fd::AsRawFd;
 
@@ -19,7 +19,7 @@ fn owned_duplicate_survives_python_close() {
         source.call_method1("write", (b"abc".as_slice(),)).unwrap();
         source.call_method0("flush").unwrap();
         source.call_method1("seek", (0,)).unwrap();
-        let file = BinaryFileno::py_new(source.clone()).unwrap();
+        let file = PyBinaryFileno::py_new(source.clone()).unwrap();
         let duplicate = file.try_clone_fd().unwrap();
         let bound_duplicate = file.bind(py).try_clone_fd().unwrap();
         assert_ne!(duplicate.as_raw_fd(), file.fileno().unwrap());
@@ -43,7 +43,7 @@ fn unavailable_and_invalid_descriptors_are_errors() {
     Python::initialize();
     Python::attach(|py| {
         let memory = py.import("io").unwrap().call_method0("BytesIO").unwrap();
-        assert!(BinaryFileno::py_new(memory)
+        assert!(PyBinaryFileno::py_new(memory)
             .unwrap()
             .try_clone_fd()
             .is_err());
@@ -55,7 +55,7 @@ fn unavailable_and_invalid_descriptors_are_errors() {
         )
         .unwrap();
         let invalid =
-            BinaryFileno::py_new(module.getattr("Invalid").unwrap().call0().unwrap()).unwrap();
+            PyBinaryFileno::py_new(module.getattr("Invalid").unwrap().call0().unwrap()).unwrap();
         assert_eq!(
             invalid.try_clone_fd().unwrap_err().raw_os_error(),
             Some(libc::EBADF)

@@ -4,8 +4,8 @@
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
 use pyo3_typed_io::{
-    BinaryFileno, BinaryRead, BinaryReadSeek, BinaryReadWrite, BinaryReadWriteSeekFileno,
-    BinaryWrite, TextFileno, TextRead, TextReadSeek, TextReadWrite, TextWrite,
+    PyBinaryFileno, PyBinaryRead, PyBinaryReadSeek, PyBinaryReadWrite, PyBinaryReadWriteSeekFileno,
+    PyBinaryWrite, PyTextFileno, PyTextRead, PyTextReadSeek, PyTextReadWrite, PyTextWrite,
 };
 use std::io::{Read, Seek, SeekFrom, Write};
 
@@ -15,7 +15,7 @@ mod benchmarks;
 
 /// Reads the whole stream with bounded reads and standard Rust retry semantics.
 #[pyfunction]
-fn binary_read_all(py: Python<'_>, mut file: BinaryRead) -> PyResult<Py<PyBytes>> {
+fn binary_read_all(py: Python<'_>, mut file: PyBinaryRead) -> PyResult<Py<PyBytes>> {
     let mut buffer = Vec::new();
     file.read_to_end(&mut buffer)?;
     Ok(PyBytes::new(py, &buffer).unbind())
@@ -23,7 +23,7 @@ fn binary_read_all(py: Python<'_>, mut file: BinaryRead) -> PyResult<Py<PyBytes>
 
 /// One `read(n)` into a fixed buffer: exactly the bytes Python handed over.
 #[pyfunction]
-fn binary_read_exactly(py: Python<'_>, mut file: BinaryRead, n: usize) -> PyResult<Py<PyBytes>> {
+fn binary_read_exactly(py: Python<'_>, mut file: PyBinaryRead, n: usize) -> PyResult<Py<PyBytes>> {
     let mut buffer = vec![0u8; n];
     let read = file.read(&mut buffer)?;
     buffer.truncate(read);
@@ -31,7 +31,7 @@ fn binary_read_exactly(py: Python<'_>, mut file: BinaryRead, n: usize) -> PyResu
 }
 
 #[pyfunction]
-fn binary_write(mut file: BinaryWrite, data: &[u8]) -> PyResult<usize> {
+fn binary_write(mut file: PyBinaryWrite, data: &[u8]) -> PyResult<usize> {
     file.write_all(data)?;
     file.flush()?;
     Ok(data.len())
@@ -39,7 +39,7 @@ fn binary_write(mut file: BinaryWrite, data: &[u8]) -> PyResult<usize> {
 
 /// Reads, seeks back to the start and reads again, to show `Seek` working on bytes.
 #[pyfunction]
-fn binary_seek_roundtrip(py: Python<'_>, mut file: BinaryReadSeek) -> PyResult<Py<PyBytes>> {
+fn binary_seek_roundtrip(py: Python<'_>, mut file: PyBinaryReadSeek) -> PyResult<Py<PyBytes>> {
     let mut first = vec![0u8; 4];
     file.read_exact(&mut first)?;
     file.seek(SeekFrom::Start(0))?;
@@ -49,7 +49,7 @@ fn binary_seek_roundtrip(py: Python<'_>, mut file: BinaryReadSeek) -> PyResult<P
 }
 
 #[pyfunction]
-fn binary_read_write(mut file: BinaryReadWrite, data: &[u8]) -> PyResult<usize> {
+fn binary_read_write(mut file: PyBinaryReadWrite, data: &[u8]) -> PyResult<usize> {
     file.write_all(data)?;
     let mut buffer = Vec::new();
     file.read_to_end(&mut buffer)?;
@@ -57,7 +57,7 @@ fn binary_read_write(mut file: BinaryReadWrite, data: &[u8]) -> PyResult<usize> 
 }
 
 #[pyfunction]
-fn binary_everything(mut file: BinaryReadWriteSeekFileno, data: &[u8]) -> PyResult<(usize, i32)> {
+fn binary_everything(mut file: PyBinaryReadWriteSeekFileno, data: &[u8]) -> PyResult<(usize, i32)> {
     file.write_all(data)?;
     file.seek(SeekFrom::Start(0))?;
     let mut buffer = Vec::new();
@@ -67,13 +67,13 @@ fn binary_everything(mut file: BinaryReadWriteSeekFileno, data: &[u8]) -> PyResu
 }
 
 #[pyfunction]
-fn binary_fileno(file: BinaryFileno) -> PyResult<i32> {
+fn binary_fileno(file: PyBinaryFileno) -> PyResult<i32> {
     Ok(file.fileno()?)
 }
 
 /// Raw descriptor compatibility; this does not promise a borrowed descriptor lifetime.
 #[pyfunction]
-fn binary_fileno_via_as_raw_fd(file: BinaryFileno) -> PyResult<i32> {
+fn binary_fileno_via_as_raw_fd(file: PyBinaryFileno) -> PyResult<i32> {
     #[cfg(unix)]
     {
         use std::os::fd::AsRawFd;
@@ -90,32 +90,32 @@ fn binary_fileno_via_as_raw_fd(file: BinaryFileno) -> PyResult<i32> {
 
 /// Reads the whole stream as text using bounded character reads.
 #[pyfunction]
-fn text_read_all(mut file: TextRead) -> PyResult<String> {
+fn text_read_all(mut file: PyTextRead) -> PyResult<String> {
     Ok(file.read_to_string()?)
 }
 
 /// Reads at most `n` **characters**, the unit Python counts a text read in.
 #[pyfunction]
-fn text_read_chars(mut file: TextRead, n: usize) -> PyResult<String> {
+fn text_read_chars(mut file: PyTextRead, n: usize) -> PyResult<String> {
     Ok(file.read_chars(n)?)
 }
 
 #[pyfunction]
-fn text_write(mut file: TextWrite, text: &str) -> PyResult<usize> {
+fn text_write(mut file: PyTextWrite, text: &str) -> PyResult<usize> {
     file.write_all_str(text)?;
     file.flush()?;
     Ok(text.chars().count())
 }
 
 #[pyfunction]
-fn text_read_write(mut file: TextReadWrite, text: &str) -> PyResult<usize> {
+fn text_read_write(mut file: PyTextReadWrite, text: &str) -> PyResult<usize> {
     file.write_all_str(text)?;
     Ok(file.read_to_string()?.chars().count())
 }
 
 /// Uses `tell` to make a cookie and `seek_to` to come back to it.
 #[pyfunction]
-fn text_seek_roundtrip(mut file: TextReadSeek, n: usize) -> PyResult<(String, String)> {
+fn text_seek_roundtrip(mut file: PyTextReadSeek, n: usize) -> PyResult<(String, String)> {
     let cookie = file.tell()?;
     let first = file.read_chars(n)?;
     file.seek_to(&cookie)?;
@@ -124,7 +124,7 @@ fn text_seek_roundtrip(mut file: TextReadSeek, n: usize) -> PyResult<(String, St
 }
 
 #[pyfunction]
-fn text_fileno(file: TextFileno) -> PyResult<i32> {
+fn text_fileno(file: PyTextFileno) -> PyResult<i32> {
     Ok(file.fileno()?)
 }
 
@@ -204,7 +204,7 @@ fn legacy_write(obj: Bound<'_, PyAny>, data: &[u8]) -> PyResult<usize> {
 /// The child holds no token; each read attaches for as long as it needs and no longer. A
 /// GIL-bound form could not leave this thread at all.
 #[pyfunction]
-fn read_on_another_thread(py: Python<'_>, file: BinaryRead) -> PyResult<usize> {
+fn read_on_another_thread(py: Python<'_>, file: PyBinaryRead) -> PyResult<usize> {
     let worker = std::thread::spawn(move || -> std::io::Result<usize> {
         let mut file = file;
         let mut sink = Vec::new();
@@ -219,7 +219,7 @@ fn read_on_another_thread(py: Python<'_>, file: BinaryRead) -> PyResult<usize> {
 
 /// The same read with the token held throughout: no attaching happens inside the loop.
 #[pyfunction]
-fn binary_read_all_bound(py: Python<'_>, file: BinaryRead) -> PyResult<Py<PyBytes>> {
+fn binary_read_all_bound(py: Python<'_>, file: PyBinaryRead) -> PyResult<Py<PyBytes>> {
     let mut file = file.into_bound(py);
     let mut buffer = Vec::new();
     file.read_to_end(&mut buffer)?;

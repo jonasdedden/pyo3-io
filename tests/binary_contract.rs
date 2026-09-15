@@ -1,13 +1,13 @@
 //! Binary readers follow the Python buffer protocol and Rust's `Read` contract.
 
 use pyo3::{prelude::*, types::PyModule};
-use pyo3_typed_io::BinaryRead;
+use pyo3_typed_io::PyBinaryRead;
 use std::{
     ffi::CString,
     io::{self, Read},
 };
 
-fn reader(events: &str) -> BinaryRead {
+fn reader(events: &str) -> PyBinaryRead {
     Python::initialize();
     Python::attach(|py| {
         let code = CString::new(format!(
@@ -34,7 +34,7 @@ reader = Reader()
             pyo3::ffi::c_str!("contract"),
         )
         .unwrap();
-        BinaryRead::py_new(module.getattr("reader").unwrap()).unwrap()
+        PyBinaryRead::py_new(module.getattr("reader").unwrap()).unwrap()
     })
 }
 

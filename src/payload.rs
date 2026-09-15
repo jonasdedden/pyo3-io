@@ -5,10 +5,10 @@ use crate::sealed::Sealed;
 /// A Python object whose `read`/`write` speak `bytes`.
 ///
 /// This is the kind [`std::io::Read`] and [`std::io::Write`] describe, so a
-/// [`PyFile<Binary, ..>`](crate::PyFile) implements them directly and every byte the Rust side
-/// sees is a byte the Python object produced. Nothing is decoded on the way through.
+/// [`PyFile<BinaryPayload, ..>`](crate::PyFile) implements them directly and every byte the Rust
+/// side sees is a byte the Python object produced. Nothing is decoded on the way through.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct Binary;
+pub struct BinaryPayload;
 
 /// A Python object whose `read`/`write` speak `str`.
 ///
@@ -21,13 +21,14 @@ pub struct Binary;
 /// one with `io.TextIOWrapper(binary_object, encoding=...)`, which is where the choice of encoding
 /// belongs — see the crate documentation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct Text;
+pub struct TextPayload;
 
-/// The payload kind of a [`PyFile`](crate::PyFile): [`Binary`] or [`Text`].
+/// The payload kind of a [`PyFile`](crate::PyFile): [`BinaryPayload`] or [`TextPayload`].
 ///
-/// Sealed; there are exactly two.
-pub trait Mode: Sealed {
-    /// Whether this is [`Text`].
+/// This is the kind of payload the object deals in, not Python's `mode` string: an object opened
+/// `"rb"` and one opened `"r+b"` are both [`BinaryPayload`]. Sealed; there are exactly two.
+pub trait Payload: Sealed {
+    /// Whether this is [`TextPayload`].
     const IS_TEXT: bool;
     /// How the kind is spelled in error messages, e.g. `binary`.
     const NAME: &'static str;
@@ -39,8 +40,8 @@ pub trait Mode: Sealed {
     const OTHER_PAYLOAD: &'static str;
 }
 
-impl Sealed for Binary {}
-impl Mode for Binary {
+impl Sealed for BinaryPayload {}
+impl Payload for BinaryPayload {
     const IS_TEXT: bool = false;
     const NAME: &'static str = "binary";
     const OTHER_NAME: &'static str = "text";
@@ -48,8 +49,8 @@ impl Mode for Binary {
     const OTHER_PAYLOAD: &'static str = "str";
 }
 
-impl Sealed for Text {}
-impl Mode for Text {
+impl Sealed for TextPayload {}
+impl Payload for TextPayload {
     const IS_TEXT: bool = true;
     const NAME: &'static str = "text";
     const OTHER_NAME: &'static str = "binary";

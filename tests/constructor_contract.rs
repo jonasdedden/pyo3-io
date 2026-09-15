@@ -2,7 +2,7 @@
 
 use pyo3::prelude::*;
 use pyo3::types::PyModule;
-use pyo3_typed_io::{BinaryRead, BinaryWrite};
+use pyo3_typed_io::{PyBinaryRead, PyBinaryWrite};
 use std::io::{Read, Write};
 
 #[test]
@@ -16,8 +16,8 @@ fn later_mutations_are_observed_and_validated() {
             c"constructor",
         ).unwrap();
         let object = module.getattr("stream").unwrap();
-        let mut reader = BinaryRead::py_new(object.clone()).unwrap();
-        let mut writer = BinaryWrite::py_new(object.clone()).unwrap();
+        let mut reader = PyBinaryRead::py_new(object.clone()).unwrap();
+        let mut writer = PyBinaryWrite::py_new(object.clone()).unwrap();
         object.setattr("read", py.None()).unwrap();
         assert!(reader.read(&mut [0; 1]).is_err());
         object

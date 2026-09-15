@@ -1,7 +1,7 @@
-error[E0599]: no method named `try_clone_fd` found for struct `PyFile<pyo3_typed_io::Binary, true, false, false, false>` in the current scope
+error[E0599]: no method named `try_clone_fd` found for struct `PyFile<BinaryPayload, true, false, false, false>` in the current scope
  --> tests/ui/clone_fd_without_capability.rs:4:18
   |
 4 |     let _ = file.try_clone_fd();
-  |                  ^^^^^^^^^^^^ method not found in `PyFile<pyo3_typed_io::Binary, true, false, false, false>`
+  |                  ^^^^^^^^^^^^ method not found in `PyFile<BinaryPayload, true, false, false, false>`
   |
-  = note: the method was found for `PyFile<M, READ, WRITE, SEEK, true>`
+  = note: the method was found for `PyFile<P, READ, WRITE, SEEK, true>`

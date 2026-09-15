@@ -209,7 +209,7 @@ class TestBufferReturnTypes:
 class TestBoundAndDetachedForms:
     """The same file, with and without a token held.
 
-    `PyFile` owns a `Py<PyAny>` and attaches for each operation; `BoundFile` borrows a
+    `PyFile` owns a `Py<PyAny>` and attaches for each operation; `BoundPyFile` borrows a
     `Python<'py>` and does not. Only the detached one can leave the thread.
     """
 

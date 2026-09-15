@@ -1,6 +1,6 @@
 //! What can go wrong, and how it reaches Rust and Python.
 
-use crate::Mode;
+use crate::Payload;
 use pyo3::exceptions::{PyBlockingIOError, PyTypeError};
 use pyo3::PyErr;
 use std::io;
@@ -160,13 +160,13 @@ impl Error {
         }
     }
 
-    /// The mismatch for a `M`-kind file whose object turned out to be the other kind.
-    pub(crate) fn wrong_payload<M: Mode>(source: PyErr) -> Self {
+    /// The mismatch for a `P`-kind file whose object turned out to be the other kind.
+    pub(crate) fn wrong_payload<P: Payload>(source: PyErr) -> Self {
         Self::WrongPayload {
-            expected: M::PAYLOAD,
-            kind: M::NAME,
-            other: M::OTHER_NAME,
-            other_payload: M::OTHER_PAYLOAD,
+            expected: P::PAYLOAD,
+            kind: P::NAME,
+            other: P::OTHER_NAME,
+            other_payload: P::OTHER_PAYLOAD,
             source,
         }
     }

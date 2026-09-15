@@ -6,13 +6,13 @@ Python file-like objects with **payload kind** and **required capabilities** in 
 
 | Task | Start with | Method reference |
 |---|---|---|
-| Read or write bytes | [`BinaryRead`], [`BinaryWrite`] | [`PyBinaryFile`] |
-| Read or write text | [`TextRead`], [`TextWrite`] | [`PyTextFile`] |
-| Read and seek | [`BinaryReadSeek`], [`TextReadSeek`] | The corresponding binary/text reference |
+| Read or write bytes | [`PyBinaryRead`], [`PyBinaryWrite`] | [`PyBinaryIO`] |
+| Read or write text | [`PyTextRead`], [`PyTextWrite`] | [`PyTextIO`] |
+| Read and seek | [`PyBinaryReadSeek`], [`PyTextReadSeek`] | The corresponding binary/text reference |
 | Construct, bind, or access the Python object | Any owned alias | [`PyFile`] |
-| Work while already attached to Python | Obtain a bound form with `bind` or `into_bound` | [`BoundPyBinaryFile`], [`BoundPyTextFile`] |
+| Work while already attached to Python | Obtain a bound form with `bind` or `into_bound` | [`BoundPyBinaryIO`], [`BoundPyTextIO`] |
 
-The complete owned catalog is in [`aliases`]; explicit lifetime-bearing names are in [`aliases::bound`]. All existing root imports still work. Each convenience alias page lists **Available operations** and links to the relevant method reference, because rustdoc does not automatically copy implementations onto type aliases.
+The complete owned catalog is in [`aliases`]; explicit lifetime-bearing names are in [`aliases::bound`]. Every alias is also importable from the crate root. Each convenience alias page lists **Available operations** and links to the relevant method reference, because rustdoc does not automatically copy implementations onto type aliases.
 
 ## Quickstart
 
@@ -26,18 +26,18 @@ Use named aliases directly as PyO3 arguments; they implement `FromPyObject`.
 
 ```rust,no_run
 use pyo3::prelude::*;
-use pyo3_typed_io::{BinaryRead, TextReadSeek};
+use pyo3_typed_io::{PyBinaryRead, PyTextReadSeek};
 use std::io::Read;
 
 #[pyfunction]
-fn read_bytes(mut source: BinaryRead) -> PyResult<Vec<u8>> {
+fn read_bytes(mut source: PyBinaryRead) -> PyResult<Vec<u8>> {
     let mut bytes = Vec::new();
     source.read_to_end(&mut bytes)?;
     Ok(bytes)
 }
 
 #[pyfunction]
-fn preview(mut source: TextReadSeek) -> PyResult<String> {
+fn preview(mut source: PyTextReadSeek) -> PyResult<String> {
     let position = source.tell()?;
     let text = source.read_chars(80)?;
     source.seek_to(&position)?;
@@ -47,11 +47,11 @@ fn preview(mut source: TextReadSeek) -> PyResult<String> {
 
 Python callers can pass `io.BytesIO` to `read_bytes` and `io.StringIO` to `preview`, or compatible real files and duck-typed objects. The preview restores the position on success; it is not a transactional operation.
 
-For manual construction, use `BinaryRead::py_new(bound_object)` or `BinaryRead::new(owned_object)`. A `PyFile` owns a Python reference and attaches to Python for operations. `file.bind(py)` produces a `BoundFile` for repeated operations while already attached; `into_bound(py)` and `unbind()` transfer between forms. Cloning a wrapper references the same Python object, not an independent stream.
+For manual construction, use `PyBinaryRead::py_new(bound_object)` or `PyBinaryRead::new(owned_object)`. A `PyFile` owns a Python reference and attaches to Python for operations. `file.bind(py)` produces a `BoundPyFile` for repeated operations while already attached; `into_bound(py)` and `unbind()` transfer between forms. Cloning a wrapper references the same Python object, not an independent stream.
 
 ## Types and construction
 
-Aliases combine `Binary` or `Text` with any of `Read`, `Write`, `Seek`, and `Fileno`, in that order — for example, `BinaryReadWriteSeek` or `TextReadFileno`. Only the requested operations exist on the value: a `BinaryRead` cannot be written to, and no text wrapper implements `std::io` traits. These flags are requirements, not guarantees: the object can still close, change, or fail at runtime.
+Aliases are spelled `Py` + `Binary` or `Text` + any of `Read`, `Write`, `Seek`, and `Fileno`, in that order — for example, `PyBinaryReadWriteSeek` or `PyTextReadFileno`. Only the requested operations exist on the value: a `PyBinaryRead` cannot be written to, and no text wrapper implements `std::io` traits. These flags are requirements, not guarantees: the object can still close, change, or fail at runtime.
 
 Construction rejects objects of the wrong payload kind (`io.TextIOBase` vs `io.RawIOBase`/`io.BufferedIOBase`), objects missing a required method (or exposing a noncallable one), known-closed streams, and streams whose `readable()`/`writable()`/`seekable()` query refuses the capability. Anything else is taken at its word, with the actual payload validated on every read. Failures surface as `TypeError` (`ValueError` for a closed stream). There is no way to skip classification: if a class inherits from the wrong half of the `io` hierarchy, fix the base; if it is someone else's, wrap it in a plain delegating object instead of inheriting.
 
@@ -71,7 +71,7 @@ Choose the encoding on the Python side: open a binary stream when Rust needs the
 * `read_chars(n)` requests at most `n` Unicode characters, not bytes or grapheme clusters. It may return fewer and rejects an overlong result.
 * `read_to_string()` collects text through bounded positive-size reads. On error, consumed text is not returned; nonblocking callers should use `read_chars` and retain each successful chunk before retrying.
 * `write_str()` returns the number of characters accepted. `write_all_str()` handles short writes on character boundaries and rejects zero progress or impossible counts.
-* `tell()` returns a `TextPosition` holding an arbitrary-size Python integer. `seek_to(&position)` restores that opaque cookie; `rewind()` and `seek_to_end()` also return `TextPosition`. Cookies are not byte offsets and should be used with the stream that produced them, subject to its positioning rules.
+* `tell()` returns a `PyTextPosition` holding an arbitrary-size Python integer. `seek_to(&position)` restores that opaque cookie; `rewind()` and `seek_to_end()` also return `PyTextPosition`. Cookies are not byte offsets and should be used with the stream that produced them, subject to its positioning rules.
 
 Text crosses into Rust as UTF-8 `String`/`str`; this is not conversion-free. Python strings may contain surrogate values that Rust UTF-8 strings cannot represent, so not every Python `str` can be extracted successfully.
 
@@ -85,7 +85,7 @@ On Unix, `try_clone_fd() -> io::Result<OwnedFd>` duplicates the descriptor with 
 
 ## Optional Python annotations
 
-`experimental-inspect` supplies structural capability protocols to PyO3's experimental inspection metadata. For example, a `TextReadSeek` argument describes `read(size) -> str | None`, `seek(offset, whence) -> int`, and `tell() -> int`.
+`experimental-inspect` supplies structural capability protocols to PyO3's experimental inspection metadata. For example, a `PyTextReadSeek` argument describes `read(size) -> str | None`, `seek(offset, whence) -> int`, and `tell() -> int`.
 
 Generating usable stubs still requires a custom `pyo3-introspection` generator with `attach_to_root` support; enabling the feature alone is not sufficient. Static protocols describe expected signatures, not stream state, payload correctness, or all dynamic attribute behavior, so static and runtime acceptance need not coincide.
 

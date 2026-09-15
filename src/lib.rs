@@ -14,13 +14,13 @@ mod fd;
 mod file_types;
 #[cfg(feature = "experimental-inspect")]
 mod introspection;
-mod mode;
+mod payload;
 mod text;
 mod write;
 
 pub use error::Error;
-pub use mode::{Binary, Mode, Text};
-pub use text::TextPosition;
+pub use payload::{BinaryPayload, Payload, TextPayload};
+pub use text::PyTextPosition;
 
 mod sealed {
     pub trait Sealed {}
@@ -29,11 +29,11 @@ mod sealed {
 /// A Python file-like object dealing in `bytes`, whose capabilities are part of its type.
 ///
 /// The four const parameters are the operations the object must support, in the order `READ`,
-/// `WRITE`, `SEEK`, `FILENO`. Prefer the named aliases — [`BinaryRead`], [`BinaryReadSeek`] and
+/// `WRITE`, `SEEK`, `FILENO`. Prefer the named aliases — [`PyBinaryRead`], [`PyBinaryReadSeek`] and
 /// so on — over spelling them out.
 ///
 /// Only the capabilities that were asked for exist on the value, so a read-only file cannot be
-/// written to, and it can never be confused with a [`PyTextFile`]. Both are compile errors rather
+/// written to, and it can never be confused with a [`PyTextIO`]. Both are compile errors rather
 /// than runtime ones.
 ///
 /// # API guide
@@ -47,14 +47,14 @@ mod sealed {
 /// and object access. `FILENO` enables [`fileno`](PyFile::fileno).
 /// `Clone`, `Debug` and `FromPyObject` are also implemented through that shared type.
 ///
-/// Start with [`BinaryRead`], [`BinaryWrite`] or [`BinaryReadSeek`], or browse the
-/// [complete alias catalog](aliases). The attached reference is [`BoundPyBinaryFile`].
-pub type PyBinaryFile<const READ: bool, const WRITE: bool, const SEEK: bool, const FILENO: bool> =
-    PyFile<Binary, READ, WRITE, SEEK, FILENO>;
+/// Start with [`PyBinaryRead`], [`PyBinaryWrite`] or [`PyBinaryReadSeek`], or browse the
+/// [complete alias catalog](aliases). The attached reference is [`BoundPyBinaryIO`].
+pub type PyBinaryIO<const READ: bool, const WRITE: bool, const SEEK: bool, const FILENO: bool> =
+    PyFile<BinaryPayload, READ, WRITE, SEEK, FILENO>;
 
 /// A Python file-like object dealing in `str`, whose capabilities are part of its type.
 ///
-/// As [`PyBinaryFile`], except that Python counts a text `read(size)` in characters, so this
+/// As [`PyBinaryIO`], except that Python counts a text `read(size)` in characters, so this
 /// deliberately does not implement [`std::io::Read`]: it has a character API instead, and seeks
 /// by the opaque cookies `tell()` produces rather than by byte offsets.
 ///
@@ -69,73 +69,76 @@ pub type PyBinaryFile<const READ: bool, const WRITE: bool, const SEEK: bool, con
 /// and object access. `FILENO` enables [`fileno`](PyFile::fileno).
 /// `Clone`, `Debug` and `FromPyObject` are also implemented through that shared type.
 ///
-/// Start with [`TextRead`], [`TextWrite`] or [`TextReadSeek`], or browse the
-/// [complete alias catalog](aliases). The attached reference is [`BoundPyTextFile`].
-pub type PyTextFile<const READ: bool, const WRITE: bool, const SEEK: bool, const FILENO: bool> =
-    PyFile<Text, READ, WRITE, SEEK, FILENO>;
+/// Start with [`PyTextRead`], [`PyTextWrite`] or [`PyTextReadSeek`], or browse the
+/// [complete alias catalog](aliases). The attached reference is [`BoundPyTextIO`].
+pub type PyTextIO<const READ: bool, const WRITE: bool, const SEEK: bool, const FILENO: bool> =
+    PyFile<TextPayload, READ, WRITE, SEEK, FILENO>;
 
 /// A binary file tied to an attached Python token.
 ///
 /// Obtain it with [`PyFile::bind`] or [`PyFile::into_bound`]. The trait implementations
-/// below use the same capability flags as [`PyBinaryFile`], without attaching per call.
-/// Shared [`as_py_object`](BoundFile::as_py_object), [`unbind`](BoundFile::unbind) and
-/// conditional [`fileno`](BoundFile::fileno) methods are documented on [`BoundFile`].
+/// below use the same capability flags as [`PyBinaryIO`], without attaching per call.
+/// Shared [`as_py_object`](BoundPyFile::as_py_object), [`unbind`](BoundPyFile::unbind) and
+/// conditional [`fileno`](BoundPyFile::fileno) methods are documented on [`BoundPyFile`].
 /// See the [bound alias catalog](aliases::bound) for concrete signatures.
-pub type BoundPyBinaryFile<
+pub type BoundPyBinaryIO<
     'py,
     const READ: bool,
     const WRITE: bool,
     const SEEK: bool,
     const FILENO: bool,
-> = BoundFile<'py, Binary, READ, WRITE, SEEK, FILENO>;
+> = BoundPyFile<'py, BinaryPayload, READ, WRITE, SEEK, FILENO>;
 
 /// A text file tied to an attached Python token.
 ///
 /// Obtain it with [`PyFile::bind`] or [`PyFile::into_bound`]. The inherent implementations
-/// below use the same capability flags as [`PyTextFile`], without attaching per call.
-/// Shared [`as_py_object`](BoundFile::as_py_object), [`unbind`](BoundFile::unbind) and
-/// conditional [`fileno`](BoundFile::fileno) methods are documented on [`BoundFile`].
+/// below use the same capability flags as [`PyTextIO`], without attaching per call.
+/// Shared [`as_py_object`](BoundPyFile::as_py_object), [`unbind`](BoundPyFile::unbind) and
+/// conditional [`fileno`](BoundPyFile::fileno) methods are documented on [`BoundPyFile`].
 /// See the [bound alias catalog](aliases::bound) for concrete signatures.
-pub type BoundPyTextFile<
+pub type BoundPyTextIO<
     'py,
     const READ: bool,
     const WRITE: bool,
     const SEEK: bool,
     const FILENO: bool,
-> = BoundFile<'py, Text, READ, WRITE, SEEK, FILENO>;
+> = BoundPyFile<'py, TextPayload, READ, WRITE, SEEK, FILENO>;
 
 pub mod aliases;
 
-// Keep every existing root import valid, but put the complete catalogs in their own pages.
+// Every alias stays importable from the crate root, but the complete catalogs live on their
+// own pages.
 #[doc(hidden)]
 pub use aliases::bound::*;
 #[doc(hidden)]
 pub use aliases::*;
 #[doc(inline)]
-pub use aliases::{BinaryRead, BinaryReadSeek, BinaryWrite, TextRead, TextReadSeek, TextWrite};
+pub use aliases::{
+    PyBinaryRead, PyBinaryReadSeek, PyBinaryWrite, PyTextRead, PyTextReadSeek, PyTextWrite,
+};
 
 /// Shared construction, binding and object access for owned binary and text files.
 ///
-/// Start with [`BinaryRead`], [`BinaryWrite`], [`TextRead`] or another [named alias](aliases),
+/// Start with [`PyBinaryRead`], [`PyBinaryWrite`], [`PyTextRead`] or another [named alias](aliases),
 /// rather than spelling this type's parameters yourself. All owned aliases share the
-/// constructors and binding methods documented here; `M` is sealed to [`Binary`] and [`Text`].
+/// constructors and binding methods documented here; `P` is sealed to [`BinaryPayload`] and [`TextPayload`].
 ///
-/// Use [`PyBinaryFile`] for the binary I/O reference and [`PyTextFile`] for the text API.
-/// [`bind`](Self::bind) and [`into_bound`](Self::into_bound) produce the attached [`BoundFile`].
-pub struct PyFile<M, const READ: bool, const WRITE: bool, const SEEK: bool, const FILENO: bool> {
+/// Use [`PyBinaryIO`] for the binary I/O reference and [`PyTextIO`] for the text API.
+/// [`bind`](Self::bind) and [`into_bound`](Self::into_bound) produce the attached [`BoundPyFile`].
+pub struct PyFile<P, const READ: bool, const WRITE: bool, const SEEK: bool, const FILENO: bool> {
     obj: Py<PyAny>,
-    // `fn() -> M` rather than `M` so the auto traits and variance come from `Py<PyAny>` alone
-    mode: PhantomData<fn() -> M>,
+    // `fn() -> P` rather than `P` so the auto traits and variance come from `Py<PyAny>` alone
+    payload: PhantomData<fn() -> P>,
 }
 
-impl<M, const READ: bool, const WRITE: bool, const SEEK: bool, const FILENO: bool> std::fmt::Debug
-    for PyFile<M, READ, WRITE, SEEK, FILENO>
+impl<P, const READ: bool, const WRITE: bool, const SEEK: bool, const FILENO: bool> std::fmt::Debug
+    for PyFile<P, READ, WRITE, SEEK, FILENO>
 where
-    M: Mode,
+    P: Payload,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("PyFile")
-            .field("mode", &M::NAME)
+            .field("payload", &P::NAME)
             .field("read", &READ)
             .field("write", &WRITE)
             .field("seek", &SEEK)
@@ -145,13 +148,13 @@ where
     }
 }
 
-impl<M, const READ: bool, const WRITE: bool, const SEEK: bool, const FILENO: bool> Clone
-    for PyFile<M, READ, WRITE, SEEK, FILENO>
+impl<P, const READ: bool, const WRITE: bool, const SEEK: bool, const FILENO: bool> Clone
+    for PyFile<P, READ, WRITE, SEEK, FILENO>
 {
     fn clone(&self) -> Self {
         Python::attach(|py| Self {
             obj: self.obj.clone_ref(py),
-            mode: PhantomData,
+            payload: PhantomData,
         })
     }
 }
@@ -164,7 +167,7 @@ static BUFFERED_IO_BASE: PyOnceLock<Py<PyType>> = PyOnceLock::new();
 
 /// What an object says about the kind of payload it deals in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Payload {
+enum DeclaredPayload {
     /// Declares a binary I/O contract.
     Binary,
     /// Declares a text I/O contract.
@@ -178,28 +181,28 @@ enum Payload {
 /// Unknown ducks remain acceptable. Attributes such as `mode` and `encoding` are not reliable
 /// payload contracts: codecs wrappers can expose a binary mode while returning text.
 /// Python instance checks can execute custom code, and subclasses can violate their contracts.
-fn classify(obj: &Bound<'_, PyAny>) -> Result<(Payload, &'static str), Error> {
+fn classify(obj: &Bound<'_, PyAny>) -> Result<(DeclaredPayload, &'static str), Error> {
     let py = obj.py();
     // IOBase alone is not binary: SpooledTemporaryFile can be a text stream.
     if obj.is_instance(TEXT_IO_BASE.import(py, "io", "TextIOBase")?)? {
-        return Ok((Payload::Text, "it is an io.TextIOBase"));
+        return Ok((DeclaredPayload::Text, "it is an io.TextIOBase"));
     }
     if obj.is_instance(RAW_IO_BASE.import(py, "io", "RawIOBase")?)?
         || obj.is_instance(BUFFERED_IO_BASE.import(py, "io", "BufferedIOBase")?)?
     {
         return Ok((
-            Payload::Binary,
+            DeclaredPayload::Binary,
             "it is an io.RawIOBase or io.BufferedIOBase",
         ));
     }
 
-    Ok((Payload::Unknown, "it is duck typed"))
+    Ok((DeclaredPayload::Unknown, "it is duck typed"))
 }
 
-impl<M, const READ: bool, const WRITE: bool, const SEEK: bool, const FILENO: bool>
-    PyFile<M, READ, WRITE, SEEK, FILENO>
+impl<P, const READ: bool, const WRITE: bool, const SEEK: bool, const FILENO: bool>
+    PyFile<P, READ, WRITE, SEEK, FILENO>
 where
-    M: Mode,
+    P: Payload,
 {
     /// Checks `obj` against the payload kind and capabilities and wraps it.
     ///
@@ -210,11 +213,11 @@ where
     /// These are best-effort checks, not proof that later I/O succeeds. Attribute lookup and
     /// capability queries may run Python code, and the object can change after construction.
     pub fn py_new(obj: Bound<'_, PyAny>) -> Result<Self, Error> {
-        Self::check_mode(&obj)?;
+        Self::check_payload(&obj)?;
         Self::check_capabilities(&obj)?;
         Ok(Self {
             obj: obj.unbind(),
-            mode: PhantomData,
+            payload: PhantomData,
         })
     }
 
@@ -223,14 +226,14 @@ where
         Python::attach(|py| Self::py_new(obj.into_bound(py)))
     }
 
-    fn check_mode(obj: &Bound<'_, PyAny>) -> Result<(), Error> {
+    fn check_payload(obj: &Bound<'_, PyAny>) -> Result<(), Error> {
         let (payload, why) = classify(obj)?;
-        let wrong = match (M::IS_TEXT, payload) {
+        let wrong = match (P::IS_TEXT, payload) {
             // Agrees, or the object said nothing and is taken at its word.
-            (_, Payload::Unknown) | (true, Payload::Text) | (false, Payload::Binary) => {
-                return Ok(())
-            }
-            (false, Payload::Text) => Error::WrongKind {
+            (_, DeclaredPayload::Unknown)
+            | (true, DeclaredPayload::Text)
+            | (false, DeclaredPayload::Binary) => return Ok(()),
+            (false, DeclaredPayload::Text) => Error::WrongKind {
                 wanted: "binary",
                 got: "text",
                 type_name: obj.get_type().name()?.to_string(),
@@ -239,7 +242,7 @@ where
                        mode. Decoding text and re-encoding it here would not round-trip the \
                        file's bytes.",
             },
-            (true, Payload::Binary) => Error::WrongKind {
+            (true, DeclaredPayload::Binary) => Error::WrongKind {
                 wanted: "text",
                 got: "binary",
                 type_name: obj.get_type().name()?.to_string(),
@@ -316,7 +319,7 @@ where
         if SEEK {
             require(intern!(py, "seek"), "seek")?;
             require_capability(intern!(py, "seekable"), "seekable", "seek", "SEEK")?;
-            if M::IS_TEXT {
+            if P::IS_TEXT {
                 // Text streams only accept opaque cookies, which come from tell()
                 require(intern!(py, "tell"), "tell")?;
             }
@@ -328,18 +331,21 @@ where
     }
 
     /// Borrows the file with a token, so the operations stop attaching for themselves.
-    pub fn bind<'py>(&self, py: Python<'py>) -> BoundFile<'py, M, READ, WRITE, SEEK, FILENO> {
-        BoundFile {
+    pub fn bind<'py>(&self, py: Python<'py>) -> BoundPyFile<'py, P, READ, WRITE, SEEK, FILENO> {
+        BoundPyFile {
             obj: self.obj.bind(py).clone(),
-            mode: PhantomData,
+            payload: PhantomData,
         }
     }
 
     /// Consuming form of [`bind`](Self::bind).
-    pub fn into_bound<'py>(self, py: Python<'py>) -> BoundFile<'py, M, READ, WRITE, SEEK, FILENO> {
-        BoundFile {
+    pub fn into_bound<'py>(
+        self,
+        py: Python<'py>,
+    ) -> BoundPyFile<'py, P, READ, WRITE, SEEK, FILENO> {
+        BoundPyFile {
             obj: self.obj.into_bound(py),
-            mode: PhantomData,
+            payload: PhantomData,
         }
     }
 
@@ -354,9 +360,9 @@ where
     }
 }
 
-impl<M, const READ: bool, const WRITE: bool, const SEEK: bool> PyFile<M, READ, WRITE, SEEK, true>
+impl<P, const READ: bool, const WRITE: bool, const SEEK: bool> PyFile<P, READ, WRITE, SEEK, true>
 where
-    M: Mode,
+    P: Payload,
 {
     /// The object's file descriptor.
     ///
@@ -369,7 +375,7 @@ where
 
 /// Shared object access and token release for attached binary and text files.
 ///
-/// Use [`BoundPyBinaryFile`] for the binary I/O reference and [`BoundPyTextFile`] for
+/// Use [`BoundPyBinaryIO`] for the binary I/O reference and [`BoundPyTextIO`] for
 /// the text API. The [bound alias catalog](aliases::bound) lists concrete signatures.
 /// See [`PyFile`] for shared construction and binding.
 ///
@@ -381,11 +387,11 @@ where
 ///
 /// ```rust,no_run
 /// use pyo3::prelude::*;
-/// use pyo3_typed_io::BinaryRead;
+/// use pyo3_typed_io::PyBinaryRead;
 /// use std::io::Read;
 ///
 /// #[pyfunction]
-/// fn count(py: Python<'_>, file: BinaryRead) -> PyResult<usize> {
+/// fn count(py: Python<'_>, file: PyBinaryRead) -> PyResult<usize> {
 ///     let mut file = file.into_bound(py);   // no attaching per read from here on
 ///     let mut sink = Vec::new();
 ///     Ok(file.read_to_end(&mut sink)?)
@@ -394,46 +400,46 @@ where
 ///
 /// Unlike [`PyFile`] this cannot leave the thread or outlive the token, which is the trade: see
 /// the crate documentation.
-pub struct BoundFile<
+pub struct BoundPyFile<
     'py,
-    M,
+    P,
     const READ: bool,
     const WRITE: bool,
     const SEEK: bool,
     const FILENO: bool,
 > {
     obj: Bound<'py, PyAny>,
-    mode: PhantomData<fn() -> M>,
+    payload: PhantomData<fn() -> P>,
 }
 
-impl<M, const READ: bool, const WRITE: bool, const SEEK: bool, const FILENO: bool> std::fmt::Debug
-    for BoundFile<'_, M, READ, WRITE, SEEK, FILENO>
+impl<P, const READ: bool, const WRITE: bool, const SEEK: bool, const FILENO: bool> std::fmt::Debug
+    for BoundPyFile<'_, P, READ, WRITE, SEEK, FILENO>
 where
-    M: Mode,
+    P: Payload,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("BoundFile")
-            .field("mode", &M::NAME)
+        f.debug_struct("BoundPyFile")
+            .field("payload", &P::NAME)
             .field("obj", &self.obj)
             .finish()
     }
 }
 
-impl<M, const READ: bool, const WRITE: bool, const SEEK: bool, const FILENO: bool> Clone
-    for BoundFile<'_, M, READ, WRITE, SEEK, FILENO>
+impl<P, const READ: bool, const WRITE: bool, const SEEK: bool, const FILENO: bool> Clone
+    for BoundPyFile<'_, P, READ, WRITE, SEEK, FILENO>
 {
     fn clone(&self) -> Self {
         Self {
             obj: self.obj.clone(),
-            mode: PhantomData,
+            payload: PhantomData,
         }
     }
 }
 
-impl<'py, M, const READ: bool, const WRITE: bool, const SEEK: bool, const FILENO: bool>
-    BoundFile<'py, M, READ, WRITE, SEEK, FILENO>
+impl<'py, P, const READ: bool, const WRITE: bool, const SEEK: bool, const FILENO: bool>
+    BoundPyFile<'py, P, READ, WRITE, SEEK, FILENO>
 where
-    M: Mode,
+    P: Payload,
 {
     /// The wrapped object.
     pub fn as_py_object(&self) -> &Bound<'py, PyAny> {
@@ -441,18 +447,18 @@ where
     }
 
     /// Releases the token, giving back a [`PyFile`] that can cross threads again.
-    pub fn unbind(self) -> PyFile<M, READ, WRITE, SEEK, FILENO> {
+    pub fn unbind(self) -> PyFile<P, READ, WRITE, SEEK, FILENO> {
         PyFile {
             obj: self.obj.unbind(),
-            mode: PhantomData,
+            payload: PhantomData,
         }
     }
 }
 
-impl<M, const READ: bool, const WRITE: bool, const SEEK: bool>
-    BoundFile<'_, M, READ, WRITE, SEEK, true>
+impl<P, const READ: bool, const WRITE: bool, const SEEK: bool>
+    BoundPyFile<'_, P, READ, WRITE, SEEK, true>
 where
-    M: Mode,
+    P: Payload,
 {
     /// The object's file descriptor. See [`PyFile::fileno`].
     pub fn fileno(&self) -> std::io::Result<i32> {
@@ -467,16 +473,16 @@ where
     }
 }
 
-impl<'py, M, const READ: bool, const WRITE: bool, const SEEK: bool, const FILENO: bool>
-    FromPyObject<'_, 'py> for PyFile<M, READ, WRITE, SEEK, FILENO>
+impl<'py, P, const READ: bool, const WRITE: bool, const SEEK: bool, const FILENO: bool>
+    FromPyObject<'_, 'py> for PyFile<P, READ, WRITE, SEEK, FILENO>
 where
-    M: Mode,
+    P: Payload,
 {
     type Error = PyErr;
 
     #[cfg(feature = "experimental-inspect")]
     const INPUT_TYPE: pyo3::inspect::PyStaticExpr =
-        introspection::protocol_hint(M::IS_TEXT, READ, WRITE, SEEK, FILENO);
+        introspection::protocol_hint(P::IS_TEXT, READ, WRITE, SEEK, FILENO);
 
     fn extract(obj: Borrowed<'_, 'py, PyAny>) -> Result<Self, Self::Error> {
         Ok(Self::py_new(obj.as_any().clone())?)

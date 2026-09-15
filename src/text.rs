@@ -1,11 +1,11 @@
-//! The `str`-shaped API of [`PyTextFile`] and [`BoundPyTextFile`].
+//! The `str`-shaped API of [`PyTextIO`] and [`BoundPyTextIO`].
 //!
 //! Python counts a text stream's `read(size)` in characters, so there is no byte count for
 //! [`std::io::Read`] to honour and this deliberately does not implement it. Characters cross the
 //! boundary as Python Unicode and Rust UTF-8 strings; no assumption is made about the stream's
 //! underlying encoding.
 
-use crate::{BoundPyTextFile, Error, PyTextFile, Text};
+use crate::{BoundPyTextIO, Error, PyTextIO, TextPayload};
 use pyo3::intern;
 use pyo3::prelude::*;
 use pyo3::types::PyInt;
@@ -16,9 +16,9 @@ use std::io;
 ///
 /// Cookies are meaningful only to the stream that produced them. They are not byte offsets.
 #[derive(Debug)]
-pub struct TextPosition(Py<PyInt>);
+pub struct PyTextPosition(Py<PyInt>);
 
-impl TextPosition {
+impl PyTextPosition {
     /// Clones the owned Python reference while attached to Python.
     pub fn clone_ref(&self, py: Python<'_>) -> Self {
         Self(self.0.clone_ref(py))
@@ -32,7 +32,7 @@ impl TextPosition {
 }
 
 impl<const WRITE: bool, const SEEK: bool, const FILENO: bool>
-    BoundPyTextFile<'_, true, WRITE, SEEK, FILENO>
+    BoundPyTextIO<'_, true, WRITE, SEEK, FILENO>
 {
     /// Reads at most `count` **characters**, the unit Python's text `read` counts in.
     ///
@@ -76,13 +76,13 @@ impl<const WRITE: bool, const SEEK: bool, const FILENO: bool>
         }
         Ok(res
             .extract::<Cow<'_, str>>()
-            .map_err(Error::wrong_payload::<Text>)?
+            .map_err(Error::wrong_payload::<TextPayload>)?
             .into_owned())
     }
 }
 
 impl<const READ: bool, const SEEK: bool, const FILENO: bool>
-    BoundPyTextFile<'_, READ, true, SEEK, FILENO>
+    BoundPyTextIO<'_, READ, true, SEEK, FILENO>
 {
     /// Writes `text`, returning the number of **characters** written.
     ///
@@ -147,43 +147,43 @@ impl<const READ: bool, const SEEK: bool, const FILENO: bool>
 /// arbitrary [`SeekFrom::Start`](std::io::SeekFrom::Start) have no meaning, and Python raises if
 /// you try.
 impl<const READ: bool, const WRITE: bool, const FILENO: bool>
-    BoundPyTextFile<'_, READ, WRITE, true, FILENO>
+    BoundPyTextIO<'_, READ, WRITE, true, FILENO>
 {
     /// The current position, as an opaque cookie for [`seek_to`](Self::seek_to).
     ///
     /// The value is not a byte offset and arithmetic on it is meaningless.
-    pub fn tell(&mut self) -> io::Result<TextPosition> {
+    pub fn tell(&mut self) -> io::Result<PyTextPosition> {
         let obj = self.as_py_object();
         let py = obj.py();
-        (|| -> PyResult<TextPosition> {
-            TextPosition::from_python(obj.call_method0(intern!(py, "tell"))?)
+        (|| -> PyResult<PyTextPosition> {
+            PyTextPosition::from_python(obj.call_method0(intern!(py, "tell"))?)
         })()
         .map_err(Into::into)
     }
 
     /// Returns to a position previously reported by [`tell`](Self::tell).
-    pub fn seek_to(&mut self, cookie: &TextPosition) -> io::Result<TextPosition> {
+    pub fn seek_to(&mut self, cookie: &PyTextPosition) -> io::Result<PyTextPosition> {
         self.py_seek(cookie.0.bind(self.as_py_object().py()), 0)
     }
 
     /// Returns to the start of the stream.
-    pub fn rewind(&mut self) -> io::Result<TextPosition> {
+    pub fn rewind(&mut self) -> io::Result<PyTextPosition> {
         let zero = 0.into_pyobject(self.as_py_object().py()).unwrap();
         self.py_seek(&zero, 0)
     }
 
     /// Moves to the end of the stream.
-    pub fn seek_to_end(&mut self) -> io::Result<TextPosition> {
+    pub fn seek_to_end(&mut self) -> io::Result<PyTextPosition> {
         let zero = 0.into_pyobject(self.as_py_object().py()).unwrap();
         self.py_seek(&zero, 2)
     }
 
-    fn py_seek(&self, offset: &Bound<'_, PyInt>, whence: i64) -> io::Result<TextPosition> {
+    fn py_seek(&self, offset: &Bound<'_, PyInt>, whence: i64) -> io::Result<PyTextPosition> {
         let obj = self.as_py_object();
         let py = obj.py();
-        (|| -> PyResult<TextPosition> {
+        (|| -> PyResult<PyTextPosition> {
             let res = obj.call_method1(intern!(py, "seek"), (offset, whence))?;
-            TextPosition::from_python(res)
+            PyTextPosition::from_python(res)
         })()
         .map_err(Into::into)
     }
@@ -193,58 +193,54 @@ impl<const READ: bool, const WRITE: bool, const FILENO: bool>
 //
 // One attach for the whole operation, then the bound implementation above.
 
-impl<const WRITE: bool, const SEEK: bool, const FILENO: bool>
-    PyTextFile<true, WRITE, SEEK, FILENO>
-{
-    /// See [`BoundPyTextFile::read_chars`](crate::BoundPyTextFile#method.read_chars).
+impl<const WRITE: bool, const SEEK: bool, const FILENO: bool> PyTextIO<true, WRITE, SEEK, FILENO> {
+    /// See [`BoundPyTextIO::read_chars`](crate::BoundPyTextIO#method.read_chars).
     pub fn read_chars(&mut self, count: usize) -> io::Result<String> {
         Python::attach(|py| self.bind(py).read_chars(count))
     }
 
-    /// See [`BoundPyTextFile::read_to_string`](crate::BoundPyTextFile#method.read_to_string).
+    /// See [`BoundPyTextIO::read_to_string`](crate::BoundPyTextIO#method.read_to_string).
     pub fn read_to_string(&mut self) -> io::Result<String> {
         Python::attach(|py| self.bind(py).read_to_string())
     }
 }
 
-impl<const READ: bool, const SEEK: bool, const FILENO: bool> PyTextFile<READ, true, SEEK, FILENO> {
-    /// See [`BoundPyTextFile::write_str`](crate::BoundPyTextFile#method.write_str).
+impl<const READ: bool, const SEEK: bool, const FILENO: bool> PyTextIO<READ, true, SEEK, FILENO> {
+    /// See [`BoundPyTextIO::write_str`](crate::BoundPyTextIO#method.write_str).
     pub fn write_str(&mut self, text: &str) -> io::Result<usize> {
         Python::attach(|py| self.bind(py).write_str(text))
     }
 
-    /// See [`BoundPyTextFile::write_all_str`](crate::BoundPyTextFile#method.write_all_str).
+    /// See [`BoundPyTextIO::write_all_str`](crate::BoundPyTextIO#method.write_all_str).
     pub fn write_all_str(&mut self, text: &str) -> io::Result<()> {
         // One attach for the whole retry loop rather than one per short write.
         Python::attach(|py| self.bind(py).write_all_str(text))
     }
 
-    /// See [`BoundPyTextFile::flush`](crate::BoundPyTextFile#method.flush).
+    /// See [`BoundPyTextIO::flush`](crate::BoundPyTextIO#method.flush).
     pub fn flush(&mut self) -> io::Result<()> {
         Python::attach(|py| self.bind(py).flush())
     }
 }
 
-impl<const READ: bool, const WRITE: bool, const FILENO: bool>
-    PyTextFile<READ, WRITE, true, FILENO>
-{
-    /// See [`BoundPyTextFile::tell`](crate::BoundPyTextFile#method.tell).
-    pub fn tell(&mut self) -> io::Result<TextPosition> {
+impl<const READ: bool, const WRITE: bool, const FILENO: bool> PyTextIO<READ, WRITE, true, FILENO> {
+    /// See [`BoundPyTextIO::tell`](crate::BoundPyTextIO#method.tell).
+    pub fn tell(&mut self) -> io::Result<PyTextPosition> {
         Python::attach(|py| self.bind(py).tell())
     }
 
-    /// See [`BoundPyTextFile::seek_to`](crate::BoundPyTextFile#method.seek_to).
-    pub fn seek_to(&mut self, cookie: &TextPosition) -> io::Result<TextPosition> {
+    /// See [`BoundPyTextIO::seek_to`](crate::BoundPyTextIO#method.seek_to).
+    pub fn seek_to(&mut self, cookie: &PyTextPosition) -> io::Result<PyTextPosition> {
         Python::attach(|py| self.bind(py).seek_to(cookie))
     }
 
-    /// See [`BoundPyTextFile::rewind`](crate::BoundPyTextFile#method.rewind).
-    pub fn rewind(&mut self) -> io::Result<TextPosition> {
+    /// See [`BoundPyTextIO::rewind`](crate::BoundPyTextIO#method.rewind).
+    pub fn rewind(&mut self) -> io::Result<PyTextPosition> {
         Python::attach(|py| self.bind(py).rewind())
     }
 
-    /// See [`BoundPyTextFile::seek_to_end`](crate::BoundPyTextFile#method.seek_to_end).
-    pub fn seek_to_end(&mut self) -> io::Result<TextPosition> {
+    /// See [`BoundPyTextIO::seek_to_end`](crate::BoundPyTextIO#method.seek_to_end).
+    pub fn seek_to_end(&mut self) -> io::Result<PyTextPosition> {
         Python::attach(|py| self.bind(py).seek_to_end())
     }
 }

@@ -1,14 +1,14 @@
-error[E0599]: the method `read` exists for mutable reference `&mut PyFile<Text, true, false, false, false>`, but its trait bounds were not satisfied
+error[E0599]: the method `read` exists for mutable reference `&mut PyFile<TextPayload, true, false, false, false>`, but its trait bounds were not satisfied
   --> tests/ui/io_read_on_text.rs:10:18
    |
 10 |     let _ = file.read(&mut buffer);
-   |                  ^^^^ method cannot be called on `&mut PyFile<Text, true, false, false, false>` due to unsatisfied trait bounds
+   |                  ^^^^ method cannot be called due to unsatisfied trait bounds
    |
   ::: src/lib.rs
    |
-   | pub struct PyFile<M, const READ: bool, const WRITE: bool, const SEEK: bool, const FILENO: bool> {
+   | pub struct PyFile<P, const READ: bool, const WRITE: bool, const SEEK: bool, const FILENO: bool> {
    | ----------------------------------------------------------------------------------------------- doesn't satisfy `_: Read`
    |
    = note: the following trait bounds were not satisfied:
-           `PyFile<Text, true, false, false, false>: std::io::Read`
-           which is required by `&mut PyFile<Text, true, false, false, false>: std::io::Read`
+           `PyFile<TextPayload, true, false, false, false>: std::io::Read`
+           which is required by `&mut PyFile<TextPayload, true, false, false, false>: std::io::Read`

@@ -18,10 +18,10 @@ from urllib.parse import unquote, urljoin, urlsplit
 
 ROOT = Path(__file__).resolve().parents[1]
 CRATE = "pyo3_typed_io"
-FAMILIES = {"PyBinaryFile", "PyTextFile", "BoundPyBinaryFile", "BoundPyTextFile"}
+FAMILIES = {"PyBinaryIO", "PyTextIO", "BoundPyBinaryIO", "BoundPyTextIO"}
 COMMON = {
-    "BinaryRead", "BinaryWrite", "BinaryReadSeek",
-    "TextRead", "TextWrite", "TextReadSeek",
+    "PyBinaryRead", "PyBinaryWrite", "PyBinaryReadSeek",
+    "PyTextRead", "PyTextWrite", "PyTextReadSeek",
 }
 CONSTRUCTORS = {"new", "py_new"}
 OWNED_COMMON = CONSTRUCTORS | {"bind", "into_bound", "as_py_object", "into_py_object"}
@@ -188,7 +188,7 @@ class Docs:
 def catalog_names(bound: bool = False) -> set[str]:
     # Deliberately independent of the Rust macro table and any private generator.
     return {
-        ("Bound" if bound else "") + kind
+        ("BoundPy" if bound else "Py") + kind
         + "".join(
             cap for bit, cap in enumerate(("Read", "Write", "Seek", "Fileno"))
             if mask & (1 << bit)
@@ -213,8 +213,8 @@ def check_summary(docs: Docs, name: str, capabilities: tuple[str, ...]) -> None:
             if target and target[1].startswith("method."):
                 operations.append((target[0].path.name, target[1][7:]))
     common = BOUND_COMMON if bound else OWNED_COMMON
-    family = f"type.{'Bound' if bound else ''}Py{kind}File.html"
-    shared = f"struct.{'BoundFile' if bound else 'PyFile'}.html"
+    family = f"type.{'BoundPy' if bound else 'Py'}{kind}IO.html"
+    shared = f"struct.{'BoundPyFile' if bound else 'PyFile'}.html"
     groups = TEXT if kind == "Text" else BINARY_REQUIRED
     allowed = set(common) | {"clone_ref"}
     required = set(common)
@@ -245,7 +245,7 @@ def check_docs(root: Path, unix: bool) -> None:
             f"unexpected aliases {actual - expected}",
         )
     docs.methods("struct.PyFile.html", OWNED_COMMON | {"fileno"})
-    docs.methods("struct.BoundFile.html", BOUND_COMMON | {"fileno"})
+    docs.methods("struct.BoundPyFile.html", BOUND_COMMON | {"fileno"})
     for name in sorted(FAMILIES):
         binary = "Binary" in name
         expected = (
@@ -259,21 +259,21 @@ def check_docs(root: Path, unix: bool) -> None:
                 f"{name}: std::io::{trait} impl {'missing' if binary else 'unexpected'}",
             )
     for name, capabilities in (
-        ("BinaryRead", ("Read",)),
-        ("BinaryReadSeek", ("Read", "Seek")),
-        ("TextWrite", ("Write",)),
-        ("TextReadSeek", ("Read", "Seek")),
-        ("BoundBinaryRead", ("Read",)),
-        ("BoundTextReadSeek", ("Read", "Seek")),
+        ("PyBinaryRead", ("Read",)),
+        ("PyBinaryReadSeek", ("Read", "Seek")),
+        ("PyTextWrite", ("Write",)),
+        ("PyTextReadSeek", ("Read", "Seek")),
+        ("BoundPyBinaryRead", ("Read",)),
+        ("BoundPyTextReadSeek", ("Read", "Seek")),
     ):
         check_summary(docs, name, capabilities)
     # Descriptor operations belong to the shared type, not a payload family.
     for bound in (False, True):
-        name = ("Bound" if bound else "") + "BinaryFileno"
+        name = ("BoundPy" if bound else "Py") + "BinaryFileno"
         subdir = root / "aliases" / ("bound" if bound else "")
         path = subdir / f"type.{name}.html"
         page = docs.page(path)
-        shared = f"struct.{'BoundFile' if bound else 'PyFile'}.html"
+        shared = f"struct.{'BoundPyFile' if bound else 'PyFile'}.html"
         links = {
             (target[0].path.name, target[1])
             for href, section in page.links

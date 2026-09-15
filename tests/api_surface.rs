@@ -12,52 +12,52 @@ fn assert_send_sync<T: Send + Sync>() {}
 
 #[test]
 fn binary_files_implement_the_std_io_traits_they_declare() {
-    assert_read::<BinaryRead>();
-    assert_read::<BinaryReadWrite>();
-    assert_read::<BinaryReadSeek>();
-    assert_read::<BinaryReadFileno>();
-    assert_read::<BinaryReadWriteSeekFileno>();
+    assert_read::<PyBinaryRead>();
+    assert_read::<PyBinaryReadWrite>();
+    assert_read::<PyBinaryReadSeek>();
+    assert_read::<PyBinaryReadFileno>();
+    assert_read::<PyBinaryReadWriteSeekFileno>();
 
-    assert_write::<BinaryWrite>();
-    assert_write::<BinaryReadWrite>();
-    assert_write::<BinaryWriteSeek>();
-    assert_write::<BinaryReadWriteSeekFileno>();
+    assert_write::<PyBinaryWrite>();
+    assert_write::<PyBinaryReadWrite>();
+    assert_write::<PyBinaryWriteSeek>();
+    assert_write::<PyBinaryReadWriteSeekFileno>();
 
-    assert_seek::<BinarySeek>();
-    assert_seek::<BinaryReadSeek>();
-    assert_seek::<BinaryWriteSeek>();
-    assert_seek::<BinaryReadWriteSeekFileno>();
+    assert_seek::<PyBinarySeek>();
+    assert_seek::<PyBinaryReadSeek>();
+    assert_seek::<PyBinaryWriteSeek>();
+    assert_seek::<PyBinaryReadWriteSeekFileno>();
 }
 
 #[test]
 fn every_alias_is_send_and_sync() {
-    assert_send_sync::<BinaryRead>();
-    assert_send_sync::<TextRead>();
-    assert_send_sync::<BinaryReadWriteSeekFileno>();
-    assert_send_sync::<TextReadWriteSeekFileno>();
+    assert_send_sync::<PyBinaryRead>();
+    assert_send_sync::<PyTextRead>();
+    assert_send_sync::<PyBinaryReadWriteSeekFileno>();
+    assert_send_sync::<PyTextReadWriteSeekFileno>();
 }
 
 #[test]
 fn text_files_have_the_character_api() {
     // Only checks that the signatures resolve; nothing is called.
     #[allow(dead_code)]
-    fn uses(mut read: TextRead, mut write: TextWrite, mut seek: TextReadSeek) {
+    fn uses(mut read: PyTextRead, mut write: PyTextWrite, mut seek: PyTextReadSeek) {
         let _: std::io::Result<String> = read.read_chars(4);
         let _: std::io::Result<String> = read.read_to_string();
         let _: std::io::Result<usize> = write.write_str("x");
         let _: std::io::Result<()> = write.write_all_str("x");
         let _: std::io::Result<()> = write.flush();
-        let cookie: TextPosition = seek.tell().unwrap();
-        let _: std::io::Result<TextPosition> = seek.seek_to(&cookie);
-        let _: std::io::Result<TextPosition> = seek.rewind();
-        let _: std::io::Result<TextPosition> = seek.seek_to_end();
+        let cookie: PyTextPosition = seek.tell().unwrap();
+        let _: std::io::Result<PyTextPosition> = seek.seek_to(&cookie);
+        let _: std::io::Result<PyTextPosition> = seek.rewind();
+        let _: std::io::Result<PyTextPosition> = seek.seek_to_end();
     }
 }
 
 #[test]
 fn fileno_exists_exactly_where_it_was_asked_for() {
     #[allow(dead_code)]
-    fn uses(binary: BinaryFileno, text: TextFileno) {
+    fn uses(binary: PyBinaryFileno, text: PyTextFileno) {
         let _: std::io::Result<i32> = binary.fileno();
         let _: std::io::Result<i32> = text.fileno();
     }
@@ -67,36 +67,36 @@ fn fileno_exists_exactly_where_it_was_asked_for() {
 fn all_thirty_aliases_exist() {
     // One mention of each, so a rename or a gap in the alias table is caught here.
     fn exists<T>() {}
-    exists::<BinaryRead>();
-    exists::<BinaryWrite>();
-    exists::<BinarySeek>();
-    exists::<BinaryFileno>();
-    exists::<BinaryReadWrite>();
-    exists::<BinaryReadSeek>();
-    exists::<BinaryReadFileno>();
-    exists::<BinaryWriteSeek>();
-    exists::<BinaryWriteFileno>();
-    exists::<BinarySeekFileno>();
-    exists::<BinaryReadWriteSeek>();
-    exists::<BinaryReadWriteFileno>();
-    exists::<BinaryReadSeekFileno>();
-    exists::<BinaryWriteSeekFileno>();
-    exists::<BinaryReadWriteSeekFileno>();
-    exists::<TextRead>();
-    exists::<TextWrite>();
-    exists::<TextSeek>();
-    exists::<TextFileno>();
-    exists::<TextReadWrite>();
-    exists::<TextReadSeek>();
-    exists::<TextReadFileno>();
-    exists::<TextWriteSeek>();
-    exists::<TextWriteFileno>();
-    exists::<TextSeekFileno>();
-    exists::<TextReadWriteSeek>();
-    exists::<TextReadWriteFileno>();
-    exists::<TextReadSeekFileno>();
-    exists::<TextWriteSeekFileno>();
-    exists::<TextReadWriteSeekFileno>();
+    exists::<PyBinaryRead>();
+    exists::<PyBinaryWrite>();
+    exists::<PyBinarySeek>();
+    exists::<PyBinaryFileno>();
+    exists::<PyBinaryReadWrite>();
+    exists::<PyBinaryReadSeek>();
+    exists::<PyBinaryReadFileno>();
+    exists::<PyBinaryWriteSeek>();
+    exists::<PyBinaryWriteFileno>();
+    exists::<PyBinarySeekFileno>();
+    exists::<PyBinaryReadWriteSeek>();
+    exists::<PyBinaryReadWriteFileno>();
+    exists::<PyBinaryReadSeekFileno>();
+    exists::<PyBinaryWriteSeekFileno>();
+    exists::<PyBinaryReadWriteSeekFileno>();
+    exists::<PyTextRead>();
+    exists::<PyTextWrite>();
+    exists::<PyTextSeek>();
+    exists::<PyTextFileno>();
+    exists::<PyTextReadWrite>();
+    exists::<PyTextReadSeek>();
+    exists::<PyTextReadFileno>();
+    exists::<PyTextWriteSeek>();
+    exists::<PyTextWriteFileno>();
+    exists::<PyTextSeekFileno>();
+    exists::<PyTextReadWriteSeek>();
+    exists::<PyTextReadWriteFileno>();
+    exists::<PyTextReadSeekFileno>();
+    exists::<PyTextWriteSeekFileno>();
+    exists::<PyTextReadWriteSeekFileno>();
 }
 
 /// `flush` is the one capability that is not in the type, and this is why.
@@ -112,8 +112,8 @@ fn all_thirty_aliases_exist() {
 /// no `BufWriter`, `write!` or `io::copy` for a plain writer. See the README.
 #[test]
 fn writable_files_are_io_write_regardless_of_flush() {
-    assert_write::<BinaryWrite>();
-    assert_write::<BinaryReadWrite>();
+    assert_write::<PyBinaryWrite>();
+    assert_write::<PyBinaryReadWrite>();
 }
 
 /// Detached wrappers can be handed to ordinary owned-I/O consumers without a Python lifetime.
@@ -124,7 +124,7 @@ fn files_can_be_given_to_consumers_that_know_nothing_about_python() {
     fn takes_reader_and_seeker<R: Read + Seek + Send + 'static>(_reader: R) {}
 
     #[allow(dead_code)]
-    fn uses(read: BinaryRead, write: BinaryWrite, seek: BinaryReadSeek) {
+    fn uses(read: PyBinaryRead, write: PyBinaryWrite, seek: PyBinaryReadSeek) {
         // e.g. `zip::ZipArchive::new`, `csv::Reader::from_reader`, or a thread of its own.
         takes_owned_reader(read);
         takes_owned_writer(write);
@@ -146,7 +146,7 @@ fn a_file_can_be_moved_to_another_thread() {
     }
 
     #[allow(dead_code)]
-    fn uses(file: BinaryRead) {
+    fn uses(file: PyBinaryRead) {
         let _ = spawn_with(file);
     }
 }
@@ -154,18 +154,18 @@ fn a_file_can_be_moved_to_another_thread() {
 /// The bound form carries the same capabilities, and only the detached one leaves the thread.
 #[test]
 fn the_bound_form_mirrors_the_detached_one() {
-    assert_read::<BoundBinaryRead<'_>>();
-    assert_write::<BoundBinaryWrite<'_>>();
-    assert_seek::<BoundBinaryReadSeek<'_>>();
-    assert_read::<BoundBinaryReadWriteSeekFileno<'_>>();
+    assert_read::<BoundPyBinaryRead<'_>>();
+    assert_write::<BoundPyBinaryWrite<'_>>();
+    assert_seek::<BoundPyBinaryReadSeek<'_>>();
+    assert_read::<BoundPyBinaryReadWriteSeekFileno<'_>>();
 
     #[allow(dead_code)]
-    fn text_api(mut read: BoundTextRead<'_>, mut seek: BoundTextReadSeek<'_>) {
+    fn text_api(mut read: BoundPyTextRead<'_>, mut seek: BoundPyTextReadSeek<'_>) {
         let _: std::io::Result<String> = read.read_chars(4);
-        let _: std::io::Result<TextPosition> = seek.tell();
+        let _: std::io::Result<PyTextPosition> = seek.tell();
     }
 
-    // `BoundFile` borrows the token, so it is deliberately neither `Send` nor `'static`; that is
+    // `BoundPyFile` borrows the token, so it is deliberately neither `Send` nor `'static`; that is
     // the whole reason `PyFile` exists alongside it. See `tests/ui/bound_file_is_not_send.rs`.
 }
 
@@ -180,14 +180,14 @@ fn files_with_fileno_can_be_given_to_descriptor_apis() {
     fn takes_owned_fd<F: AsFd + Send + 'static>(_: F) {}
 
     #[allow(dead_code)]
-    fn uses(binary: BinaryFileno, text: TextFileno, both: BinaryReadWriteSeekFileno) {
+    fn uses(binary: PyBinaryFileno, text: PyTextFileno, both: PyBinaryReadWriteSeekFileno) {
         takes_fd(binary.try_clone_fd().unwrap());
         takes_raw_fd(text);
         takes_owned_fd(both.try_clone_fd().unwrap());
     }
 
     #[allow(dead_code)]
-    fn bound(file: BoundBinaryFileno<'_>) {
+    fn bound(file: BoundPyBinaryFileno<'_>) {
         takes_fd(file.try_clone_fd().unwrap());
         takes_raw_fd(file);
     }

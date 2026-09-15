@@ -1,9 +1,9 @@
-use pyo3_typed_io::{BinaryFileno, BoundBinaryFileno};
+use pyo3_typed_io::{PyBinaryFileno, BoundPyBinaryFileno};
 use std::os::fd::AsFd;
 
 fn assert_fd<T: AsFd>() {}
 
 fn main() {
-    assert_fd::<BinaryFileno>();
-    assert_fd::<BoundBinaryFileno<'_>>();
+    assert_fd::<PyBinaryFileno>();
+    assert_fd::<BoundPyBinaryFileno<'_>>();
 }

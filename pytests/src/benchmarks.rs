@@ -2,7 +2,7 @@
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
-use pyo3_typed_io::{BinaryRead, BinaryWrite, TextRead};
+use pyo3_typed_io::{PyBinaryRead, PyBinaryWrite, PyTextRead};
 use std::io::{Read, Write};
 
 fn unknown(implementation: &str) -> PyErr {
@@ -18,10 +18,10 @@ pub fn bench_construct(obj: Bound<'_, PyAny>, implementation: &str, count: usize
     for _ in 0..count {
         match implementation {
             "typed-detached" => {
-                std::hint::black_box(obj.extract::<BinaryRead>()?);
+                std::hint::black_box(obj.extract::<PyBinaryRead>()?);
             }
             "typed-bound" => {
-                std::hint::black_box(obj.extract::<BinaryRead>()?.into_bound(obj.py()));
+                std::hint::black_box(obj.extract::<PyBinaryRead>()?.into_bound(obj.py()));
             }
             "legacy" => {
                 std::hint::black_box(pyo3_file::PyFileLikeObject::py_new(obj.clone())?);
@@ -85,9 +85,9 @@ pub fn bench_read(
         return Err(PyValueError::new_err("chunk exceeds maximum buffer size"));
     }
     let (count, data) = match implementation {
-        "typed-detached" => read(obj.extract::<BinaryRead>()?, chunk, verify)?,
+        "typed-detached" => read(obj.extract::<PyBinaryRead>()?, chunk, verify)?,
         "typed-bound" => read(
-            obj.extract::<BinaryRead>()?.into_bound(obj.py()),
+            obj.extract::<PyBinaryRead>()?.into_bound(obj.py()),
             chunk,
             verify,
         )?,
@@ -134,9 +134,9 @@ pub fn bench_write(
         ));
     }
     Ok(match implementation {
-        "typed-detached" => write(obj.extract::<BinaryWrite>()?, data, count, flush)?,
+        "typed-detached" => write(obj.extract::<PyBinaryWrite>()?, data, count, flush)?,
         "typed-bound" => write(
-            obj.extract::<BinaryWrite>()?.into_bound(obj.py()),
+            obj.extract::<PyBinaryWrite>()?.into_bound(obj.py()),
             data,
             count,
             flush,
@@ -157,9 +157,9 @@ pub fn bench_write(
 #[pyfunction]
 pub fn bench_text_read(obj: Bound<'_, PyAny>, implementation: &str) -> PyResult<String> {
     Ok(match implementation {
-        "typed-detached" => obj.extract::<TextRead>()?.read_to_string()?,
+        "typed-detached" => obj.extract::<PyTextRead>()?.read_to_string()?,
         "typed-bound" => obj
-            .extract::<TextRead>()?
+            .extract::<PyTextRead>()?
             .into_bound(obj.py())
             .read_to_string()?,
         "legacy" => {

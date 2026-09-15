@@ -3,7 +3,7 @@
 //! There is deliberately no `AsFd`: Python can close the descriptor during a Rust borrow.
 //! Use fallible `fileno()` for a number, or `try_clone_fd()` for an independently owned duplicate.
 
-use crate::{BoundFile, Mode, PyFile};
+use crate::{BoundPyFile, Payload, PyFile};
 use pyo3::Python;
 use std::io;
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
@@ -29,9 +29,9 @@ fn duplicate(fd: RawFd) -> io::Result<OwnedFd> {
     Ok(unsafe { OwnedFd::from_raw_fd(duplicate) })
 }
 
-impl<M, const READ: bool, const WRITE: bool, const SEEK: bool> PyFile<M, READ, WRITE, SEEK, true>
+impl<P, const READ: bool, const WRITE: bool, const SEEK: bool> PyFile<P, READ, WRITE, SEEK, true>
 where
-    M: Mode,
+    P: Payload,
 {
     /// Duplicates `fileno()` into an independently owned, close-on-exec descriptor.
     ///
@@ -47,10 +47,10 @@ where
     }
 }
 
-impl<M, const READ: bool, const WRITE: bool, const SEEK: bool>
-    BoundFile<'_, M, READ, WRITE, SEEK, true>
+impl<P, const READ: bool, const WRITE: bool, const SEEK: bool>
+    BoundPyFile<'_, P, READ, WRITE, SEEK, true>
 where
-    M: Mode,
+    P: Payload,
 {
     /// Duplicates the descriptor. See [`PyFile::try_clone_fd`] for ownership and buffering.
     pub fn try_clone_fd(&self) -> io::Result<OwnedFd> {
@@ -58,10 +58,10 @@ where
     }
 }
 
-impl<M, const READ: bool, const WRITE: bool, const SEEK: bool> AsRawFd
-    for PyFile<M, READ, WRITE, SEEK, true>
+impl<P, const READ: bool, const WRITE: bool, const SEEK: bool> AsRawFd
+    for PyFile<P, READ, WRITE, SEEK, true>
 where
-    M: Mode,
+    P: Payload,
 {
     /// # Panics
     ///
@@ -72,10 +72,10 @@ where
     }
 }
 
-impl<M, const READ: bool, const WRITE: bool, const SEEK: bool> AsRawFd
-    for BoundFile<'_, M, READ, WRITE, SEEK, true>
+impl<P, const READ: bool, const WRITE: bool, const SEEK: bool> AsRawFd
+    for BoundPyFile<'_, P, READ, WRITE, SEEK, true>
 where
-    M: Mode,
+    P: Payload,
 {
     /// # Panics
     ///

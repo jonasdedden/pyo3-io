@@ -31,7 +31,7 @@ fn pyo3_filelike_binary_files_carry_every_capability_at_once() {
     assert_write::<PyBinaryFile>();
     assert_seek::<PyBinaryFile>();
 
-    // Here the capabilities are separate: `BinaryRead` is `Read` and nothing else. See
+    // Here the capabilities are separate: `PyBinaryRead` is `Read` and nothing else. See
     // tests/ui/write_on_read_only.rs, tests/ui/seek_without_capability.rs.
 }
 
