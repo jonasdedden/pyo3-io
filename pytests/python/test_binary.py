@@ -209,7 +209,7 @@ class TestBufferReturnTypes:
 class TestBoundAndDetachedForms:
     """The same file, with and without a token held.
 
-    `PyFile` owns a `Py<PyAny>` and attaches for each operation; `BoundPyFile` borrows a
+    `PyIO` owns a `Py<PyAny>` and attaches for each operation; `BoundPyIO` borrows a
     `Python<'py>` and does not. Only the detached one can leave the thread.
     """
 
@@ -244,7 +244,7 @@ class TestDescriptorTraits:
         with pytest.raises(BaseException) as excinfo:
             ext.binary_fileno_via_as_raw_fd(io.BytesIO(b"abc"))
         assert "Panic" in type(excinfo.value).__name__
-        assert "use PyFile::fileno for the fallible form" in str(excinfo.value)
+        assert "use PyIO::fileno for the fallible form" in str(excinfo.value)
 
     def test_and_the_fallible_form_does_not(self) -> None:
         with pytest.raises(OSError) as excinfo:

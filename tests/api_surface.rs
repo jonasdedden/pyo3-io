@@ -165,8 +165,8 @@ fn the_bound_form_mirrors_the_detached_one() {
         let _: std::io::Result<PyTextPosition> = seek.tell();
     }
 
-    // `BoundPyFile` borrows the token, so it is deliberately neither `Send` nor `'static`; that is
-    // the whole reason `PyFile` exists alongside it. See `tests/ui/bound_file_is_not_send.rs`.
+    // `BoundPyIO` borrows the token, so it is deliberately neither `Send` nor `'static`; that is
+    // the whole reason `PyIO` exists alongside it. See `tests/ui/bound_file_is_not_send.rs`.
 }
 
 /// Borrowing the Python object's descriptor is not sound; an owned duplicate supports `AsFd`.

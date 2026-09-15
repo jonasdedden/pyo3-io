@@ -110,7 +110,7 @@ pub enum Error {
         query: &'static str,
         /// The method that would have been called.
         method: &'static str,
-        /// How the capability is spelled in `PyFile`'s parameters.
+        /// How the capability is spelled in `PyIO`'s parameters.
         capability: &'static str,
     },
 

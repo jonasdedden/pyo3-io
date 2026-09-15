@@ -1,4 +1,4 @@
-error[E0599]: the method `write` exists for mutable reference `&mut PyFile<BinaryPayload, true, false, false, false>`, but its trait bounds were not satisfied
+error[E0599]: the method `write` exists for mutable reference `&mut PyIO<BinaryPayload, true, false, false, false>`, but its trait bounds were not satisfied
  --> tests/ui/write_on_read_only.rs:8:18
   |
 8 |     let _ = file.write(b"nope");
@@ -6,9 +6,9 @@ error[E0599]: the method `write` exists for mutable reference `&mut PyFile<Binar
   |
  ::: src/lib.rs
   |
-  | pub struct PyFile<P, const READ: bool, const WRITE: bool, const SEEK: bool, const FILENO: bool> {
-  | ----------------------------------------------------------------------------------------------- doesn't satisfy `_: Write`
+  | pub struct PyIO<P, const READ: bool, const WRITE: bool, const SEEK: bool, const FILENO: bool> {
+  | --------------------------------------------------------------------------------------------- doesn't satisfy `_: Write`
   |
   = note: the following trait bounds were not satisfied:
-          `PyFile<BinaryPayload, true, false, false, false>: std::io::Write`
-          which is required by `&mut PyFile<BinaryPayload, true, false, false, false>: std::io::Write`
+          `PyIO<BinaryPayload, true, false, false, false>: std::io::Write`
+          which is required by `&mut PyIO<BinaryPayload, true, false, false, false>: std::io::Write`

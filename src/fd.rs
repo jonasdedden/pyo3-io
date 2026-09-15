@@ -3,7 +3,7 @@
 //! There is deliberately no `AsFd`: Python can close the descriptor during a Rust borrow.
 //! Use fallible `fileno()` for a number, or `try_clone_fd()` for an independently owned duplicate.
 
-use crate::{BoundPyFile, Payload, PyFile};
+use crate::{BoundPyIO, Payload, PyIO};
 use pyo3::Python;
 use std::io;
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
@@ -12,7 +12,7 @@ fn expect_fd(fd: io::Result<i32>) -> RawFd {
     fd.unwrap_or_else(|err| {
         panic!(
             "fileno() failed: {err}. AsRawFd cannot return an error; \
-             use PyFile::fileno for the fallible form"
+             use PyIO::fileno for the fallible form"
         )
     })
 }
@@ -29,7 +29,7 @@ fn duplicate(fd: RawFd) -> io::Result<OwnedFd> {
     Ok(unsafe { OwnedFd::from_raw_fd(duplicate) })
 }
 
-impl<P, const READ: bool, const WRITE: bool, const SEEK: bool> PyFile<P, READ, WRITE, SEEK, true>
+impl<P, const READ: bool, const WRITE: bool, const SEEK: bool> PyIO<P, READ, WRITE, SEEK, true>
 where
     P: Payload,
 {
@@ -48,38 +48,38 @@ where
 }
 
 impl<P, const READ: bool, const WRITE: bool, const SEEK: bool>
-    BoundPyFile<'_, P, READ, WRITE, SEEK, true>
+    BoundPyIO<'_, P, READ, WRITE, SEEK, true>
 where
     P: Payload,
 {
-    /// Duplicates the descriptor. See [`PyFile::try_clone_fd`] for ownership and buffering.
+    /// Duplicates the descriptor. See [`PyIO::try_clone_fd`] for ownership and buffering.
     pub fn try_clone_fd(&self) -> io::Result<OwnedFd> {
         duplicate(self.fileno()?)
     }
 }
 
 impl<P, const READ: bool, const WRITE: bool, const SEEK: bool> AsRawFd
-    for PyFile<P, READ, WRITE, SEEK, true>
+    for PyIO<P, READ, WRITE, SEEK, true>
 where
     P: Payload,
 {
     /// # Panics
     ///
     /// If `fileno()` raises, which Python objects without a descriptor do. Use
-    /// [`fileno`](PyFile::fileno) to handle that.
+    /// [`fileno`](PyIO::fileno) to handle that.
     fn as_raw_fd(&self) -> RawFd {
         expect_fd(self.fileno())
     }
 }
 
 impl<P, const READ: bool, const WRITE: bool, const SEEK: bool> AsRawFd
-    for BoundPyFile<'_, P, READ, WRITE, SEEK, true>
+    for BoundPyIO<'_, P, READ, WRITE, SEEK, true>
 where
     P: Payload,
 {
     /// # Panics
     ///
-    /// As [`AsRawFd::as_raw_fd`] for [`PyFile`].
+    /// As [`AsRawFd::as_raw_fd`] for [`PyIO`].
     fn as_raw_fd(&self) -> RawFd {
         expect_fd(self.fileno())
     }

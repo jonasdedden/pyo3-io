@@ -1,4 +1,4 @@
-error[E0599]: the method `seek` exists for mutable reference `&mut PyFile<TextPayload, true, false, true, false>`, but its trait bounds were not satisfied
+error[E0599]: the method `seek` exists for mutable reference `&mut PyIO<TextPayload, true, false, true, false>`, but its trait bounds were not satisfied
  --> tests/ui/io_seek_on_text.rs:8:18
   |
 8 |     let _ = file.seek(SeekFrom::Current(4));
@@ -6,9 +6,9 @@ error[E0599]: the method `seek` exists for mutable reference `&mut PyFile<TextPa
   |
  ::: src/lib.rs
   |
-  | pub struct PyFile<P, const READ: bool, const WRITE: bool, const SEEK: bool, const FILENO: bool> {
-  | ----------------------------------------------------------------------------------------------- doesn't satisfy `_: Seek`
+  | pub struct PyIO<P, const READ: bool, const WRITE: bool, const SEEK: bool, const FILENO: bool> {
+  | --------------------------------------------------------------------------------------------- doesn't satisfy `PyIO<TextPayload, true, false, true, false>: Seek`
   |
   = note: the following trait bounds were not satisfied:
-          `PyFile<TextPayload, true, false, true, false>: Seek`
-          which is required by `&mut PyFile<TextPayload, true, false, true, false>: Seek`
+          `PyIO<TextPayload, true, false, true, false>: Seek`
+          which is required by `&mut PyIO<TextPayload, true, false, true, false>: Seek`

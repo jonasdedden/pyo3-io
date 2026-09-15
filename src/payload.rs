@@ -5,7 +5,7 @@ use crate::sealed::Sealed;
 /// A Python object whose `read`/`write` speak `bytes`.
 ///
 /// This is the kind [`std::io::Read`] and [`std::io::Write`] describe, so a
-/// [`PyFile<BinaryPayload, ..>`](crate::PyFile) implements them directly and every byte the Rust
+/// [`PyIO<BinaryPayload, ..>`](crate::PyIO) implements them directly and every byte the Rust
 /// side sees is a byte the Python object produced. Nothing is decoded on the way through.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct BinaryPayload;
@@ -23,7 +23,7 @@ pub struct BinaryPayload;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct TextPayload;
 
-/// The payload kind of a [`PyFile`](crate::PyFile): [`BinaryPayload`] or [`TextPayload`].
+/// The payload kind of a [`PyIO`](crate::PyIO): [`BinaryPayload`] or [`TextPayload`].
 ///
 /// This is the kind of payload the object deals in, not Python's `mode` string: an object opened
 /// `"rb"` and one opened `"r+b"` are both [`BinaryPayload`]. Sealed; there are exactly two.

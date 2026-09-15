@@ -10,7 +10,7 @@
 //!   into documentation; `payload_type!` maps it to [`BinaryPayload`](crate::BinaryPayload)
 //!   or [`TextPayload`](crate::TextPayload).
 
-macro_rules! file_types {
+macro_rules! io_types {
     ($define:ident) => {
         $define! {
             PyBinaryFileno, BoundPyBinaryFileno, BinaryFileno: Binary [fileno];
@@ -57,7 +57,7 @@ macro_rules! payload_type {
     };
 }
 
-// Translate the named capabilities to the four boolean parameters of PyFile/BoundPyFile.
+// Translate the named capabilities to the four boolean parameters of PyIO/BoundPyIO.
 macro_rules! has_capability {
     (read; read $(, $rest:ident)*) => { true };
     (write; write $(, $rest:ident)*) => { true };
@@ -69,4 +69,4 @@ macro_rules! has_capability {
     ($wanted:ident;) => { false };
 }
 
-pub(crate) use {file_types, has_capability, payload_type};
+pub(crate) use {has_capability, io_types, payload_type};

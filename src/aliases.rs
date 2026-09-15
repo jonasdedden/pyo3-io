@@ -6,13 +6,13 @@
 //!
 //! Each alias lists its available operations and links to their family reference.
 //! Already-attached forms are in [`bound`]; most callers obtain them with
-//! [`bind`](crate::PyFile::bind) or [`into_bound`](crate::PyFile::into_bound)
+//! [`bind`](crate::PyIO::bind) or [`into_bound`](crate::PyIO::into_bound)
 //! without naming a bound type. All aliases remain importable from the crate root.
 
-use crate::file_types::{file_types, has_capability, payload_type};
+use crate::io_types::{has_capability, io_types, payload_type};
 
 // Explicit fragments keep links on the family reference: rustdoc's Type::method resolution
-// otherwise follows a type alias to the shared PyFile/BoundPyFile page.
+// otherwise follows a type alias to the shared PyIO/BoundPyIO page.
 macro_rules! method_link {
     ($family:expr, $method:ident) => {
         concat!(
@@ -125,24 +125,24 @@ macro_rules! define_aliases {
         $(
             #[doc = concat!("An owned `", stringify!($payload), "` stream requiring `", stringify!($($capability),*), "`.")]
             #[doc = "\n# Available operations\n\n\
-                - **Construction:** [`new`](crate::PyFile::new), [`py_new`](crate::PyFile::py_new).\n\
-                - **Binding:** [`bind`](crate::PyFile::bind), [`into_bound`](crate::PyFile::into_bound).\n\
-                - **Object access:** [`as_py_object`](crate::PyFile::as_py_object), \
-                  [`into_py_object`](crate::PyFile::into_py_object).\n\
+                - **Construction:** [`new`](crate::PyIO::new), [`py_new`](crate::PyIO::py_new).\n\
+                - **Binding:** [`bind`](crate::PyIO::bind), [`into_bound`](crate::PyIO::into_bound).\n\
+                - **Object access:** [`as_py_object`](crate::PyIO::as_py_object), \
+                  [`into_py_object`](crate::PyIO::into_py_object).\n\
                 - **Common traits:** [`Clone`], [`Debug`](std::fmt::Debug), \
                   [`FromPyObject`](pyo3::FromPyObject).\n"]
             $(
-                #[doc = operation_doc!($payload, concat!("Py", stringify!($payload), "IO"), PyFile, $capability)]
-                #[cfg_attr(unix, doc = unix_operation_doc!(PyFile, $capability))]
+                #[doc = operation_doc!($payload, concat!("Py", stringify!($payload), "IO"), PyIO, $capability)]
+                #[cfg_attr(unix, doc = unix_operation_doc!(PyIO, $capability))]
             )*
             #[doc = concat!("\n# API reference\n\n\
                 Rustdoc does not copy implementations onto convenience aliases. See \
                 [`Py", stringify!($payload), "IO`](crate::Py", stringify!($payload), "IO) for I/O methods \
-                and [`PyFile`](crate::PyFile) for shared operations. Only the capabilities listed \
+                and [`PyIO`](crate::PyIO) for shared operations. Only the capabilities listed \
                 above are available on this alias.\n\nThe attached counterpart is [`",
                 stringify!($bound), "`](crate::aliases::bound::", stringify!($bound),
                 "). See the [quickstart](crate#quickstart) for usage examples.")]
-            pub type $alias = crate::PyFile<
+            pub type $alias = crate::PyIO<
                 payload_type!($payload),
                 { has_capability!(read; $($capability),*) },
                 { has_capability!(write; $($capability),*) },
@@ -153,38 +153,38 @@ macro_rules! define_aliases {
     };
 }
 
-file_types!(define_aliases);
+io_types!(define_aliases);
 
 /// Complete catalog of aliases tied to an attached Python token.
 ///
 /// Prefer constructing an [owned alias](super) and calling
-/// [`bind`](crate::PyFile::bind) or [`into_bound`](crate::PyFile::into_bound).
+/// [`bind`](crate::PyIO::bind) or [`into_bound`](crate::PyIO::into_bound).
 /// These names are mainly useful when writing explicit lifetime-bearing signatures.
 /// They are also importable from the crate root.
 pub mod bound {
-    use crate::file_types::{file_types, has_capability, payload_type};
+    use crate::io_types::{has_capability, io_types, payload_type};
 
     macro_rules! define_bound_aliases {
         ($($alias:ident, $bound:ident, $protocol:ident: $payload:ident [$($capability:ident),+];)*) => {
             $(
                 #[doc = concat!("An attached `", stringify!($payload), "` stream requiring `", stringify!($($capability),*), "`.")]
                 #[doc = concat!("\nObtained from [`", stringify!($alias), "`](crate::aliases::",
-                    stringify!($alias), ") with [`bind`](crate::PyFile::bind) or \
-                    [`into_bound`](crate::PyFile::into_bound); it cannot outlive its Python token.\n")]
+                    stringify!($alias), ") with [`bind`](crate::PyIO::bind) or \
+                    [`into_bound`](crate::PyIO::into_bound); it cannot outlive its Python token.\n")]
                 #[doc = "\n# Available operations\n\n\
-                    - **Object access:** [`as_py_object`](crate::BoundPyFile::as_py_object).\n\
-                    - **Release the token:** [`unbind`](crate::BoundPyFile::unbind) returns the owned form.\n\
+                    - **Object access:** [`as_py_object`](crate::BoundPyIO::as_py_object).\n\
+                    - **Release the token:** [`unbind`](crate::BoundPyIO::unbind) returns the owned form.\n\
                     - **Common traits:** [`Clone`], [`Debug`](std::fmt::Debug).\n"]
                 $(
-                    #[doc = operation_doc!($payload, concat!("BoundPy", stringify!($payload), "IO"), BoundPyFile, $capability)]
-                    #[cfg_attr(unix, doc = unix_operation_doc!(BoundPyFile, $capability))]
+                    #[doc = operation_doc!($payload, concat!("BoundPy", stringify!($payload), "IO"), BoundPyIO, $capability)]
+                    #[cfg_attr(unix, doc = unix_operation_doc!(BoundPyIO, $capability))]
                 )*
                 #[doc = concat!("\n# API reference\n\n\
                     Rustdoc does not copy implementations onto convenience aliases. See \
                     [`BoundPy", stringify!($payload), "IO`](crate::BoundPy", stringify!($payload), "IO) \
-                    for I/O methods and [`BoundPyFile`](crate::BoundPyFile) for shared operations. \
+                    for I/O methods and [`BoundPyIO`](crate::BoundPyIO) for shared operations. \
                     Only the capabilities listed above are available on this alias.")]
-                pub type $bound<'py> = crate::BoundPyFile<
+                pub type $bound<'py> = crate::BoundPyIO<
                     'py,
                     payload_type!($payload),
                     { has_capability!(read; $($capability),*) },
@@ -196,5 +196,5 @@ pub mod bound {
         };
     }
 
-    file_types!(define_bound_aliases);
+    io_types!(define_bound_aliases);
 }

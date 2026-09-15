@@ -9,7 +9,7 @@ Python file-like objects with **payload kind** and **required capabilities** in 
 | Read or write bytes | [`PyBinaryRead`], [`PyBinaryWrite`] | [`PyBinaryIO`] |
 | Read or write text | [`PyTextRead`], [`PyTextWrite`] | [`PyTextIO`] |
 | Read and seek | [`PyBinaryReadSeek`], [`PyTextReadSeek`] | The corresponding binary/text reference |
-| Construct, bind, or access the Python object | Any owned alias | [`PyFile`] |
+| Construct, bind, or access the Python object | Any owned alias | [`PyIO`] |
 | Work while already attached to Python | Obtain a bound form with `bind` or `into_bound` | [`BoundPyBinaryIO`], [`BoundPyTextIO`] |
 
 The complete owned catalog is in [`aliases`]; explicit lifetime-bearing names are in [`aliases::bound`]. Every alias is also importable from the crate root. Each convenience alias page lists **Available operations** and links to the relevant method reference, because rustdoc does not automatically copy implementations onto type aliases.
@@ -47,7 +47,7 @@ fn preview(mut source: PyTextReadSeek) -> PyResult<String> {
 
 Python callers can pass `io.BytesIO` to `read_bytes` and `io.StringIO` to `preview`, or compatible real files and duck-typed objects. The preview restores the position on success; it is not a transactional operation.
 
-For manual construction, use `PyBinaryRead::py_new(bound_object)` or `PyBinaryRead::new(owned_object)`. A `PyFile` owns a Python reference and attaches to Python for operations. `file.bind(py)` produces a `BoundPyFile` for repeated operations while already attached; `into_bound(py)` and `unbind()` transfer between forms. Cloning a wrapper references the same Python object, not an independent stream.
+For manual construction, use `PyBinaryRead::py_new(bound_object)` or `PyBinaryRead::new(owned_object)`. A `PyIO` owns a Python reference and attaches to Python for operations. `file.bind(py)` produces a `BoundPyIO` for repeated operations while already attached; `into_bound(py)` and `unbind()` transfer between forms. Cloning a wrapper references the same Python object, not an independent stream.
 
 ## Types and construction
 

@@ -214,7 +214,7 @@ def check_summary(docs: Docs, name: str, capabilities: tuple[str, ...]) -> None:
                 operations.append((target[0].path.name, target[1][7:]))
     common = BOUND_COMMON if bound else OWNED_COMMON
     family = f"type.{'BoundPy' if bound else 'Py'}{kind}IO.html"
-    shared = f"struct.{'BoundPyFile' if bound else 'PyFile'}.html"
+    shared = f"struct.{'BoundPyIO' if bound else 'PyIO'}.html"
     groups = TEXT if kind == "Text" else BINARY_REQUIRED
     allowed = set(common) | {"clone_ref"}
     required = set(common)
@@ -244,8 +244,8 @@ def check_docs(root: Path, unix: bool) -> None:
             f"{relative}: missing aliases {expected - actual}; "
             f"unexpected aliases {actual - expected}",
         )
-    docs.methods("struct.PyFile.html", OWNED_COMMON | {"fileno"})
-    docs.methods("struct.BoundPyFile.html", BOUND_COMMON | {"fileno"})
+    docs.methods("struct.PyIO.html", OWNED_COMMON | {"fileno"})
+    docs.methods("struct.BoundPyIO.html", BOUND_COMMON | {"fileno"})
     for name in sorted(FAMILIES):
         binary = "Binary" in name
         expected = (
@@ -273,7 +273,7 @@ def check_docs(root: Path, unix: bool) -> None:
         subdir = root / "aliases" / ("bound" if bound else "")
         path = subdir / f"type.{name}.html"
         page = docs.page(path)
-        shared = f"struct.{'BoundPyFile' if bound else 'PyFile'}.html"
+        shared = f"struct.{'BoundPyIO' if bound else 'PyIO'}.html"
         links = {
             (target[0].path.name, target[1])
             for href, section in page.links

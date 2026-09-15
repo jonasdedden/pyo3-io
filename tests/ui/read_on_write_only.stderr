@@ -1,4 +1,4 @@
-error[E0599]: the method `read` exists for mutable reference `&mut PyFile<BinaryPayload, false, true, false, false>`, but its trait bounds were not satisfied
+error[E0599]: the method `read` exists for mutable reference `&mut PyIO<BinaryPayload, false, true, false, false>`, but its trait bounds were not satisfied
  --> tests/ui/read_on_write_only.rs:9:18
   |
 9 |     let _ = file.read(&mut buffer);
@@ -6,9 +6,9 @@ error[E0599]: the method `read` exists for mutable reference `&mut PyFile<Binary
   |
  ::: src/lib.rs
   |
-  | pub struct PyFile<P, const READ: bool, const WRITE: bool, const SEEK: bool, const FILENO: bool> {
-  | ----------------------------------------------------------------------------------------------- doesn't satisfy `_: Read`
+  | pub struct PyIO<P, const READ: bool, const WRITE: bool, const SEEK: bool, const FILENO: bool> {
+  | --------------------------------------------------------------------------------------------- doesn't satisfy `_: Read`
   |
   = note: the following trait bounds were not satisfied:
-          `PyFile<BinaryPayload, false, true, false, false>: std::io::Read`
-          which is required by `&mut PyFile<BinaryPayload, false, true, false, false>: std::io::Read`
+          `PyIO<BinaryPayload, false, true, false, false>: std::io::Read`
+          which is required by `&mut PyIO<BinaryPayload, false, true, false, false>: std::io::Read`

@@ -1,4 +1,4 @@
-//! Type stub protocols for [`PyFile`](crate::PyFile).
+//! Type stub protocols for [`PyIO`](crate::PyIO).
 //!
 //! Every payload kind and capability set gets a `typing.Protocol` naming exactly the methods the
 //! Rust side will call on the object, and `FromPyObject::INPUT_TYPE` points at the matching one.
@@ -13,7 +13,7 @@
 //! root module of whichever extension links it; the stub generator adopts them into that module
 //! and drops the ones no annotation refers to. All encoding happens during const evaluation.
 
-use crate::file_types::{file_types, has_capability, payload_type};
+use crate::io_types::{has_capability, io_types, payload_type};
 use crate::Payload;
 use pyo3::impl_::introspection::SerializedIntrospectionFragment;
 use pyo3::inspect::{PyClassNameStaticExpr, PyStaticConstant, PyStaticExpr};
@@ -129,7 +129,7 @@ macro_rules! define_protocols {
     };
 }
 
-file_types!(define_protocols);
+io_types!(define_protocols);
 
 /// With no required methods there is no useful structural protocol, so use `typing.Any`.
 pub(crate) const fn protocol_hint(
