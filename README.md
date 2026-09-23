@@ -62,7 +62,7 @@ Choose the encoding on the Python side: open a binary stream when Rust needs the
 ### Binary
 
 * `Read` calls Python `read(size)` with a bounded byte count. Python `bytes` use a borrowed `PyBytes` fast path before copying into the Rust destination. Other buffer exporters are snapshotted with `memoryview(...).tobytes()`, preserving raw buffer bytes rather than converting individual elements. A `list[int]` is not a buffer and is rejected.
-* Results larger than the requested byte count are rejected. Bulk `read_to_end`/`read_to_string` use the standard Rust bounded-read defaults, including `Interrupted` retries; there is no universal `read(-1)` shortcut. Binary `read_to_string` performs Rust UTF-8 validation.
+* Results larger than the requested byte count are rejected. Bulk `read_to_end`/`read_to_string` keep the standard Rust contract — bounded positive-size reads (at most 64 KiB each), `Interrupted` retries, and data read before an error kept — but append straight from each returned `bytes` instead of zero-filling a buffer first; there is no universal `read(-1)` shortcut. Binary `read_to_string` performs Rust UTF-8 validation, with std's rules for invalid data.
 * `Write` passes Python `bytes`, honors short-write counts, and rejects counts larger than the input. `write_all` uses the usual retry behavior.
 * `Seek` uses byte-oriented `SeekFrom`; positions and offsets must fit the supported integer ranges.
 

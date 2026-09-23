@@ -136,3 +136,80 @@ fn read_to_string_uses_std_partial_error_and_utf8_semantics() {
         assert_eq!(out, expected);
     }
 }
+
+#[test]
+fn read_to_string_joins_characters_split_across_reads() {
+    let mut file = reader("[b'\\xc3', b'\\xa9', b'z']");
+    let mut out = String::from("prefix");
+    assert_eq!(file.read_to_string(&mut out).unwrap(), 3);
+    assert_eq!(out, "prefixéz");
+
+    let mut file = reader("[b'\\xc3', b'\\xa9', b'z']");
+    let mut out = String::new();
+    assert_eq!(file.read_to_string(&mut out).unwrap(), 3);
+    assert_eq!(out, "éz");
+}
+
+#[test]
+fn read_to_end_rejects_an_overlong_chunk_and_keeps_what_came_before() {
+    // Larger than any bulk read size.
+    let mut file = reader("[b'ab', b'x' * (64 * 1024 + 1)]");
+    let mut out = b"prefix".to_vec();
+    assert_eq!(
+        file.read_to_end(&mut out).unwrap_err().kind(),
+        io::ErrorKind::InvalidData
+    );
+    assert_eq!(out, b"prefixab");
+}
+
+/// Reads `len` bytes of a repeating pattern, recording every size it is asked for.
+fn recording_reader(py: Python<'_>, len: usize) -> (PyBinaryRead, Bound<'_, PyAny>) {
+    let code = CString::new(format!(
+        r#"
+class Reader:
+    def __init__(self, data):
+        self.data, self.sizes = memoryview(data), []
+    def read(self, size):
+        self.sizes.append(size)
+        chunk, self.data = self.data[:size], self.data[size:]
+        return bytes(chunk)
+reader = Reader((bytes(range(256)) * ({len} // 256 + 1))[:{len}])
+"#
+    ))
+    .unwrap();
+    let module = PyModule::from_code(py, &code, c"sizes.py", c"sizes").unwrap();
+    let reader = module.getattr("reader").unwrap();
+    (PyBinaryRead::py_new(reader.clone()).unwrap(), reader)
+}
+
+#[test]
+fn bulk_read_sizes_are_bounded_and_honour_reserved_capacity() {
+    Python::initialize();
+    Python::attach(|py| {
+        let asked = |reader: &Bound<'_, PyAny>| {
+            reader
+                .getattr("sizes")
+                .unwrap()
+                .extract::<Vec<usize>>()
+                .unwrap()
+        };
+        let len = 4 << 20;
+        let (file, reader) = recording_reader(py, len);
+        let mut out = Vec::new();
+        assert_eq!(file.bind(py).read_to_end(&mut out).unwrap(), len);
+        let expected: Vec<u8> = (0..=255u8).cycle().take(len).collect();
+        assert_eq!(out, expected);
+        let sizes = asked(&reader);
+        assert!(
+            sizes.iter().all(|&size| 0 < size && size <= 64 * 1024),
+            "{sizes:?}"
+        );
+
+        // A buffer sized for a small stream is filled by one read, then one more finds the end.
+        let (file, reader) = recording_reader(py, 50_000);
+        let mut out = Vec::with_capacity(50_000);
+        assert_eq!(file.bind(py).read_to_end(&mut out).unwrap(), 50_000);
+        assert_eq!(asked(&reader)[0], 50_000);
+        assert_eq!(asked(&reader).len(), 2);
+    });
+}
