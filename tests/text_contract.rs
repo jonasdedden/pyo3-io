@@ -124,3 +124,38 @@ fn bulk_writes_retry_without_losing_multibyte_characters_and_flush_is_optional()
         );
     });
 }
+
+#[test]
+fn character_counts_come_from_the_string_not_an_overridden_len() {
+    Python::initialize();
+    Python::attach(|py| {
+        let lying = "class Lying(str):\n def __len__(self): return 0\n";
+        let obj = fixture(
+            py,
+            &format!("{lying}class Stream:\n def read(self, size): return Lying('é🦀z')\nstream = Stream()"),
+        );
+        let mut file: PyTextRead = obj.extract().unwrap();
+        let err = file.read_chars(2).unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::InvalidData);
+        assert!(err.to_string().contains("3 characters"), "{err}");
+        assert_eq!(file.read_chars(3).unwrap(), "é🦀z");
+
+        // Written text is counted the same way, so an honest count of 3 is not "impossible".
+        let obj = fixture(
+            py,
+            "class Stream:\n def write(self, text): return 3\nstream = Stream()",
+        );
+        let mut file: PyTextWrite = obj.extract().unwrap();
+        assert_eq!(file.write_str("é🦀z").unwrap(), 3);
+        file.write_all_str("é🦀z").unwrap();
+        let obj = fixture(
+            py,
+            "class Stream:\n def write(self, text): return 4\nstream = Stream()",
+        );
+        let mut file: PyTextWrite = obj.extract().unwrap();
+        assert_eq!(
+            file.write_str("é🦀z").unwrap_err().kind(),
+            ErrorKind::InvalidData
+        );
+    });
+}

@@ -8,8 +8,7 @@
 use crate::{BoundPyTextIO, Error, PyTextIO, TextPayload};
 use pyo3::intern;
 use pyo3::prelude::*;
-use pyo3::types::PyInt;
-use std::borrow::Cow;
+use pyo3::types::{PyInt, PyString};
 use std::io;
 
 /// An opaque, arbitrary-precision position returned by a Python text stream.
@@ -17,6 +16,17 @@ use std::io;
 /// Cookies are meaningful only to the stream that produced them. They are not byte offsets.
 #[derive(Debug)]
 pub struct PyTextPosition(Py<PyInt>);
+
+/// The number of code points in `text`, which Python stores alongside it.
+///
+/// Read directly rather than through `len()`, which a `str` subclass could override. For any
+/// string that converts to Rust UTF-8, this equals `chars().count()` of the converted string.
+fn char_len(text: &Bound<'_, PyString>) -> usize {
+    // SAFETY: `text` is a live, attached `str` (or subclass) instance, for which
+    // PyUnicode_GetLength cannot fail; it only reads the stored length.
+    let len = unsafe { pyo3::ffi::PyUnicode_GetLength(text.as_ptr()) };
+    usize::try_from(len).expect("a str has a non-negative length")
+}
 
 impl PyTextPosition {
     /// Clones the owned Python reference while attached to Python.
@@ -38,15 +48,8 @@ impl<const WRITE: bool, const SEEK: bool, const FILENO: bool>
     ///
     /// Returns fewer at end of stream, and an empty string once it is reached.
     pub fn read_chars(&mut self, count: usize) -> io::Result<String> {
-        let asked = count;
-        let count = i64::try_from(count).map_err(|_| Error::OutOfRange {
-            what: "character count",
-        })?;
-        let text = self.py_read(count)?;
-        let got = text.chars().count();
-        if got > asked {
-            return Err(Error::OverlongTextRead { got, asked }.into());
-        }
+        let mut text = String::new();
+        self.read_chars_into(count, &mut text)?;
         Ok(text)
     }
 
@@ -58,26 +61,42 @@ impl<const WRITE: bool, const SEEK: bool, const FILENO: bool>
     pub fn read_to_string(&mut self) -> io::Result<String> {
         let mut out = String::new();
         loop {
-            match self.read_chars(8192) {
-                Ok(more) if more.is_empty() => return Ok(out),
-                Ok(more) => out.push_str(&more),
+            match self.read_chars_into(8192, &mut out) {
+                Ok(0) => return Ok(out),
+                Ok(_) => {}
                 Err(err) if err.kind() == io::ErrorKind::Interrupted => continue,
                 Err(err) => return Err(err),
             }
         }
     }
 
-    fn py_read(&self, count: i64) -> Result<String, Error> {
+    /// Appends at most `count` characters to `out`, returning how many; `out` is untouched on
+    /// error. The text is copied once, straight out of the Python string.
+    fn read_chars_into(&self, count: usize, out: &mut String) -> io::Result<usize> {
+        let asked = count;
+        let count = i64::try_from(count).map_err(|_| Error::OutOfRange {
+            what: "character count",
+        })?;
         let obj = self.as_py_object();
         let py = obj.py();
-        let res = obj.call_method1(intern!(py, "read"), (count,))?;
-        if res.is_none() {
-            return Err(Error::would_block_read());
-        }
-        Ok(res
-            .extract::<Cow<'_, str>>()
-            .map_err(Error::wrong_payload::<TextPayload>)?
-            .into_owned())
+        (|| -> Result<usize, Error> {
+            let res = obj.call_method1(intern!(py, "read"), (count,))?;
+            if res.is_none() {
+                return Err(Error::would_block_read());
+            }
+            let text = res
+                .cast::<PyString>()
+                .map_err(|err| Error::wrong_payload::<TextPayload>(err.into()))?;
+            // Borrowed, not copied: the string's own UTF-8 form, which CPython caches on it.
+            let utf8 = text.to_cow().map_err(Error::wrong_payload::<TextPayload>)?;
+            let got = char_len(text);
+            if got > asked {
+                return Err(Error::OverlongTextRead { got, asked });
+            }
+            out.push_str(&utf8);
+            Ok(got)
+        })()
+        .map_err(Into::into)
     }
 }
 
@@ -89,29 +108,25 @@ impl<const READ: bool, const SEEK: bool, const FILENO: bool>
     /// Like [`std::io::Write::write`] this may write less than all of it; see
     /// [`write_all_str`](Self::write_all_str).
     pub fn write_str(&mut self, text: &str) -> io::Result<usize> {
-        let obj = self.as_py_object();
-        let py = obj.py();
-        crate::write::write_result(
-            py,
-            obj.call_method1(intern!(py, "write"), (text,)),
-            text.chars().count(),
-            "characters",
-        )
-        .map_err(Into::into)
+        self.py_write(text).map(|(written, _)| written)
     }
 
     /// Writes all of `text`.
     pub fn write_all_str(&mut self, text: &str) -> io::Result<()> {
         let mut rest = text;
         while !rest.is_empty() {
-            let written = match self.write_str(rest) {
-                Ok(written) => written,
+            let (written, available) = match self.py_write(rest) {
+                Ok(counts) => counts,
                 Err(err) if err.kind() == io::ErrorKind::Interrupted => continue,
                 Err(err) => return Err(err),
             };
             if written == 0 {
                 return Err(Error::WroteNothing { unit: "characters" }.into());
             }
+            if written == available {
+                return Ok(());
+            }
+            // A short write: only now is it worth walking the characters to find where to resume.
             let consumed = rest
                 .char_indices()
                 .nth(written)
@@ -119,6 +134,24 @@ impl<const READ: bool, const SEEK: bool, const FILENO: bool>
             rest = &rest[consumed..];
         }
         Ok(())
+    }
+
+    /// One `write` call, returning the characters written and the characters offered.
+    fn py_write(&self, text: &str) -> io::Result<(usize, usize)> {
+        let obj = self.as_py_object();
+        let py = obj.py();
+        let text = PyString::new(py, text);
+        // Python knew the length the moment it built the string; counting the characters
+        // again in Rust would be a second pass over the text.
+        let available = char_len(&text);
+        crate::write::write_result(
+            py,
+            obj.call_method1(intern!(py, "write"), (text,)),
+            available,
+            "characters",
+        )
+        .map(|written| (written, available))
+        .map_err(Into::into)
     }
 
     /// Flushes the object, or does nothing if it has no `flush`.
