@@ -2,7 +2,7 @@
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
-use pyo3_typed_io::{PyBinaryRead, PyBinaryWrite, PyTextRead};
+use pyo3_typed_io::{BoundPyTextRead, PyBinaryRead, PyBinaryWrite, PyTextRead, PyTextWrite};
 use std::io::{Read, Write};
 
 fn unknown(implementation: &str) -> PyErr {
@@ -152,26 +152,120 @@ pub fn bench_write(
     })
 }
 
-/// Whole text streams only: the unit of work is the identical Unicode string.
-/// Legacy/filelike UTF-8 conversion is part of their adaptation cost.
+/// chunk=0 reads the whole stream; positive chunks are `read_chars` calls, typed only, since
+/// legacy/filelike size their reads in bytes. Legacy/filelike UTF-8 conversion is part of their
+/// adaptation cost. Returns the UTF-8 length; verify=true also returns the text, for untimed
+/// correctness checks only, so timed calls do not convert the result back to Python.
 #[pyfunction]
-pub fn bench_text_read(obj: Bound<'_, PyAny>, implementation: &str) -> PyResult<String> {
-    Ok(match implementation {
-        "typed-detached" => obj.extract::<PyTextRead>()?.read_to_string()?,
-        "typed-bound" => obj
+pub fn bench_text_read(
+    obj: Bound<'_, PyAny>,
+    implementation: &str,
+    chunk: usize,
+    verify: bool,
+) -> PyResult<(usize, Option<String>)> {
+    let text = match (implementation, chunk) {
+        ("typed-detached", 0) => obj.extract::<PyTextRead>()?.read_to_string()?,
+        ("typed-bound", 0) => obj
             .extract::<PyTextRead>()?
             .into_bound(obj.py())
             .read_to_string()?,
-        "legacy" => {
+        ("typed-detached", _) => read_chars(obj.extract::<PyTextRead>()?, chunk)?,
+        ("typed-bound", _) => read_chars(obj.extract::<PyTextRead>()?.into_bound(obj.py()), chunk)?,
+        ("legacy", 0) => {
             let mut result = String::new();
             pyo3_file::PyFileLikeObject::py_new(obj)?.read_to_string(&mut result)?;
             result
         }
-        "filelike" => {
+        ("filelike", 0) => {
             let mut result = String::new();
             pyo3_filelike::PyTextFile::from(obj).read_to_string(&mut result)?;
             result
         }
+        ("legacy" | "filelike", _) => {
+            return Err(PyValueError::new_err(
+                "character-sized reads are typed only",
+            ))
+        }
         _ => return Err(unknown(implementation)),
-    })
+    };
+    Ok((text.len(), verify.then_some(text)))
+}
+
+fn read_chars(mut file: impl ReadChars, chunk: usize) -> std::io::Result<String> {
+    let mut result = String::new();
+    loop {
+        match file.read_chars(chunk) {
+            Ok(more) if more.is_empty() => return Ok(result),
+            Ok(more) => result.push_str(&more),
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(e) => return Err(e),
+        }
+    }
+}
+
+trait ReadChars {
+    fn read_chars(&mut self, count: usize) -> std::io::Result<String>;
+}
+
+impl ReadChars for PyTextRead {
+    fn read_chars(&mut self, count: usize) -> std::io::Result<String> {
+        PyTextRead::read_chars(self, count)
+    }
+}
+
+impl ReadChars for BoundPyTextRead<'_> {
+    fn read_chars(&mut self, count: usize) -> std::io::Result<String> {
+        BoundPyTextRead::read_chars(self, count)
+    }
+}
+
+/// Constructs once and writes the same string `count` times. Legacy takes UTF-8 bytes and
+/// decodes them back to `str`; typed hands over the `str`; filelike has no text writer. Flush is identical for all paths.
+#[pyfunction]
+pub fn bench_text_write(
+    obj: Bound<'_, PyAny>,
+    implementation: &str,
+    data: &str,
+    count: usize,
+    flush: bool,
+) -> PyResult<usize> {
+    if count == 0 || data.is_empty() || data.len().checked_mul(count).is_none() {
+        return Err(PyValueError::new_err(
+            "nonempty data and positive, nonoverflowing count required",
+        ));
+    }
+    let py = obj.py();
+    match implementation {
+        "typed-detached" => {
+            let mut file = obj.extract::<PyTextWrite>()?;
+            for _ in 0..count {
+                file.write_all_str(data)?;
+            }
+            if flush {
+                file.flush()?;
+            }
+        }
+        "typed-bound" => {
+            let mut file = obj.extract::<PyTextWrite>()?.into_bound(py);
+            for _ in 0..count {
+                file.write_all_str(data)?;
+            }
+            if flush {
+                file.flush()?;
+            }
+        }
+        "legacy" => {
+            write(
+                pyo3_file::PyFileLikeObject::py_new(obj)?,
+                data.as_bytes(),
+                count,
+                flush,
+            )?;
+        }
+        "filelike" => {
+            return Err(PyValueError::new_err("pyo3-filelike cannot write text"));
+        }
+        _ => return Err(unknown(implementation)),
+    }
+    Ok(data.len() * count)
 }

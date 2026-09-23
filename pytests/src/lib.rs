@@ -296,7 +296,9 @@ fn filelike_write(obj: Bound<'_, PyAny>, data: &[u8]) -> PyResult<usize> {
 #[pymodule]
 mod pyo3_typed_io_tests {
     #[pymodule_export]
-    use super::benchmarks::{bench_construct, bench_read, bench_text_read, bench_write};
+    use super::benchmarks::{
+        bench_construct, bench_read, bench_text_read, bench_text_write, bench_write,
+    };
 
     #[pymodule_export]
     use super::{

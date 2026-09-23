@@ -53,10 +53,18 @@ def bench_read(obj: Any, implementation: str, chunk: int, verify: bool) -> tuple
     verify=true copies the complete result, for untimed correctness checks only.
     """
 
-def bench_text_read(obj: Any, implementation: str) -> str:
+def bench_text_read(obj: Any, implementation: str, chunk: int, verify: bool) -> tuple[int, str | None]:
     """
-    Whole text streams only: the unit of work is the identical Unicode string.
-    Legacy/filelike UTF-8 conversion is part of their adaptation cost.
+    chunk=0 reads the whole stream; positive chunks are `read_chars` calls, typed only, since
+    legacy/filelike size their reads in bytes. Legacy/filelike UTF-8 conversion is part of their
+    adaptation cost. Returns the UTF-8 length; verify=true also returns the text, for untimed
+    correctness checks only, so timed calls do not convert the result back to Python.
+    """
+
+def bench_text_write(obj: Any, implementation: str, data: str, count: int, flush: bool) -> int:
+    """
+    Constructs once and writes the same string `count` times. Legacy takes UTF-8 bytes and
+    decodes them back to `str`; typed hands over the `str`; filelike has no text writer.
     """
 
 def bench_write(obj: Any, implementation: str, data: bytes, count: int, flush: bool) -> int:

@@ -57,10 +57,35 @@ class BenchmarkTests(unittest.TestCase):
                 self.assertEqual(stream.getvalue(), b"\x00\xff" * 7)
                 self.assertEqual(stream.flushes, int(flush))
 
-    def test_typed_unicode_whole_stream(self) -> None:
+    def test_typed_unicode_text_content_and_count(self) -> None:
         text = "héλ🙂" * 4000
+        encoded = len(text.encode())
         for implementation in IMPLEMENTATIONS[:2]:
-            self.assertEqual(ext.bench_text_read(io.StringIO(text), implementation), text)
+            for chunk in (0, 1, 37, 4096):
+                with self.subTest(implementation=implementation, chunk=chunk):
+                    self.assertEqual(
+                        ext.bench_text_read(io.StringIO(text), implementation, chunk, True),
+                        (encoded, text),
+                    )
+                    self.assertEqual(
+                        ext.bench_text_read(io.StringIO(text), implementation, chunk, False),
+                        (encoded, None),
+                    )
+
+    def test_text_write_repetition(self) -> None:
+        # pyo3-file counts the characters Python reports as bytes, so it is ASCII-only here.
+        for implementation, text in (
+            *((name, "é🙂") for name in IMPLEMENTATIONS[:2]),
+            ("legacy", "ab"),
+        ):
+            for flush in (False, True):
+                with self.subTest(implementation=implementation, flush=flush):
+                    stream = io.StringIO()
+                    self.assertEqual(
+                        ext.bench_text_write(stream, implementation, text, 7, flush),
+                        len(text.encode()) * 7,
+                    )
+                    self.assertEqual(stream.getvalue(), text * 7)
 
     def test_invalid_parameters(self) -> None:
         for call in (
@@ -71,7 +96,11 @@ class BenchmarkTests(unittest.TestCase):
             lambda: ext.bench_write(io.BytesIO(), "unknown", b"a", 1, False),
             lambda: ext.bench_write(io.BytesIO(), "typed-bound", b"a", 0, False),
             lambda: ext.bench_write(io.BytesIO(), "typed-bound", b"", 1, False),
-            lambda: ext.bench_text_read(io.StringIO(), "unknown"),
+            lambda: ext.bench_text_read(io.StringIO(), "unknown", 0, False),
+            lambda: ext.bench_text_read(io.StringIO(), "legacy", 1, False),
+            lambda: ext.bench_text_write(io.StringIO(), "unknown", "a", 1, False),
+            lambda: ext.bench_text_write(io.StringIO(), "filelike", "a", 1, False),
+            lambda: ext.bench_text_write(io.StringIO(), "typed-bound", "", 1, False),
         ):
             with self.assertRaises(ValueError):
                 call()

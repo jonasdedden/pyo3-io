@@ -19,6 +19,9 @@ from pathlib import Path
 from typing import Any, BinaryIO
 
 IMPLEMENTATIONS: tuple[str, ...] = ("typed-detached", "typed-bound", "legacy", "filelike")
+TYPED: tuple[str, ...] = IMPLEMENTATIONS[:2]
+# pyo3-filelike has no text writer.
+TEXT_WRITERS: tuple[str, ...] = IMPLEMENTATIONS[:3]
 
 # A benchmark step: resetting, running, or checking. Results are discarded, so every
 # step shares one shape and `report` stays oblivious to what each step returns.
@@ -50,6 +53,8 @@ def report(label: str, cases: dict[str, tuple[Step, Step, Step]], args: argparse
     Rotate implementation order between repeats and report median repeat means.
     Results are dropped inside the timed call, identically for every adapter.
     """
+    if getattr(args, "filter", None) and args.filter not in label:
+        return
     samples: dict[str, list[float]] = {}
     active: dict[str, tuple[Step, Step]] = {}
     for name, (reset, call, check) in cases.items():
@@ -117,6 +122,28 @@ def write_cases(ext: Any, stream: BinaryIO, block: bytes, count: int, flush: boo
     }
 
 
+def text_write_cases(ext: Any, block: str, count: int) -> dict[str, tuple[Step, Step, Step]]:
+    # A fresh StringIO per reset: getvalue() in the untimed check would otherwise switch a reused
+    # one out of its append mode, and every timed write after it would pay for StringIO's slower
+    # path instead of the adapter's.
+    stream = [io.StringIO()]
+
+    def reset() -> None:
+        stream[0] = io.StringIO()
+
+    def check(name: str) -> None:
+        check_equal(ext.bench_text_write(stream[0], name, block, count, False), len(block.encode()) * count)
+        check_equal(stream[0].getvalue(), block * count)
+
+    return {
+        name: (
+            reset,
+            lambda name=name: ext.bench_text_write(stream[0], name, block, count, False),
+            lambda name=name: check(name),
+        ) for name in TEXT_WRITERS
+    }
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--profile", choices=("release", "debug"), default="release")
@@ -128,6 +155,7 @@ def main() -> None:
     parser.add_argument("--size", type=positive, help="binary bytes / text characters (default 1 Mi)")
     parser.add_argument("--chunks", type=positive, nargs="+", help="binary chunk sizes")
     parser.add_argument("--constructors", type=positive, help="constructions per batch")
+    parser.add_argument("--filter", help="only run workloads whose label contains this text")
     args = parser.parse_args()
     args.repeats = args.repeats or (2 if args.quick else 5)
     args.iterations = args.iterations or (2 if args.quick else 10)
@@ -155,7 +183,8 @@ def main() -> None:
     print("Real files are buffered, warm/page-cached; flush is NOT fsync/durable storage.")
     print("Full binary reads allocate Rust output; chunk reads reuse a fixed buffer.")
     print("Timed binary reads return only a byte count; untimed checks compare every byte.")
-    print("Text compares identical whole Unicode strings, never characters against bytes.")
+    print("Text compares identical Unicode strings, never characters against bytes;")
+    print("timed text reads return only a UTF-8 length, like binary reads.")
     print("Use --memory for fresh-process peak RSS; it is not per-adapter allocation cost.\n")
 
     data: bytes = (bytes(range(256)) * ((size + 255) // 256))[:size]
@@ -181,16 +210,23 @@ def main() -> None:
                            write_cases(ext, stream, block, count, flush), args)
     for kind, pattern in (("ASCII", "hello world\n"), ("Unicode", "héλ🙂\n")):
         text = (pattern * ((size + len(pattern) - 1) // len(pattern)))[:size]
+        encoded = len(text.encode())
         with io.StringIO(text) as text_stream:
-            report(f"{kind} text {len(text)}ch/{len(text.encode())}B", {
-                name: (
-                    lambda: text_stream.seek(0),
-                    lambda name=name: ext.bench_text_read(text_stream, name),
-                    lambda name=name: check_equal(ext.bench_text_read(text_stream, name), text),
-                ) for name in IMPLEMENTATIONS
-            }, args)
-    print("\nText chunk comparisons omitted: legacy/filelike use byte-sized buffers,")
-    print("whereas typed text reads count characters. No speed ranking is inferred.")
+            for chunk in [0, *chunks]:
+                report(f"{kind} text read {len(text)}ch/{encoded}B chunk={chunk or 'all'}", {
+                    name: (
+                        lambda: text_stream.seek(0),
+                        lambda name=name, chunk=chunk: ext.bench_text_read(
+                            text_stream, name, chunk, False),
+                        lambda name=name, chunk=chunk: check_equal(
+                            ext.bench_text_read(text_stream, name, chunk, True), (encoded, text)),
+                    ) for name in (IMPLEMENTATIONS if chunk == 0 else TYPED)
+                }, args)
+        for chunk in [size, *chunks]:
+            block = text[:min(chunk, size)]
+            count = max(1, size // len(block))
+            report(f"{kind} text write {len(block)}ch x {count}",
+                   text_write_cases(ext, block, count), args)
     if args.memory:
         print("\nBinary bulk-read peak process RSS (one fresh process per case).")
         print("Includes Python, extension loading and input setup; before/after are high-water")
