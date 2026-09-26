@@ -59,40 +59,52 @@ def files(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Path]:
     return paths
 
 
+def _in_io_hierarchy(factories: dict[str, Callable[[], Any]]) -> dict[str, Callable[[], Any]]:
+    """Outside POSIX, `TemporaryFile` is `NamedTemporaryFile`, whose wrapper is not in the `io`
+    hierarchy; that object is covered by `duck_typed_factories` instead."""
+    if tempfile.TemporaryFile is not tempfile.NamedTemporaryFile:
+        return factories
+    return {name: f for name, f in factories.items() if not name.startswith("tempfile.")}
+
+
 def binary_factories(files: dict[str, Path]) -> dict[str, Callable[[], Any]]:
-    return {
-        "open rb": lambda: open(files["bin"], "rb"),
-        "open rb unbuffered": lambda: open(files["bin"], "rb", buffering=0),
-        "open r+b": lambda: open(files["bin"], "r+b"),
-        "io.BytesIO": lambda: io.BytesIO(BYTES),
-        "io.BufferedRWPair": lambda: io.BufferedRWPair(io.BytesIO(BYTES), io.BytesIO()),
-        "gzip rb": lambda: gzip.open(files["gz"], "rb"),
-        "gzip.GzipFile": lambda: gzip.GzipFile(files["gz"]),
-        "bz2.BZ2File": lambda: bz2.BZ2File(io.BytesIO(bz2.compress(BYTES))),
-        "lzma.LZMAFile": lambda: lzma.LZMAFile(io.BytesIO(lzma.compress(BYTES))),
-        "zipfile.ZipExtFile": lambda: zipfile.ZipFile(files["zip"]).open("a.bin"),
-        "tarfile ExFileObject": lambda: tarfile.open(files["tar"]).extractfile("a.bin"),
-        "tempfile.TemporaryFile": lambda: tempfile.TemporaryFile(),
-        "socket.makefile rb": lambda: socket.socketpair()[0].makefile("rb"),
-        "os.fdopen rb": lambda: os.fdopen(os.open(files["bin"], os.O_RDONLY), "rb"),
-        "subprocess pipe": lambda: (
-            subprocess.run(["cat", str(files["bin"])], stdout=subprocess.PIPE, check=True)
-            and io.BytesIO(BYTES)
-        ),
-        "sys.stdout.buffer": lambda: sys.stdout.buffer,
-    }
+    return _in_io_hierarchy(
+        {
+            "open rb": lambda: open(files["bin"], "rb"),
+            "open rb unbuffered": lambda: open(files["bin"], "rb", buffering=0),
+            "open r+b": lambda: open(files["bin"], "r+b"),
+            "io.BytesIO": lambda: io.BytesIO(BYTES),
+            "io.BufferedRWPair": lambda: io.BufferedRWPair(io.BytesIO(BYTES), io.BytesIO()),
+            "gzip rb": lambda: gzip.open(files["gz"], "rb"),
+            "gzip.GzipFile": lambda: gzip.GzipFile(files["gz"]),
+            "bz2.BZ2File": lambda: bz2.BZ2File(io.BytesIO(bz2.compress(BYTES))),
+            "lzma.LZMAFile": lambda: lzma.LZMAFile(io.BytesIO(lzma.compress(BYTES))),
+            "zipfile.ZipExtFile": lambda: zipfile.ZipFile(files["zip"]).open("a.bin"),
+            "tarfile ExFileObject": lambda: tarfile.open(files["tar"]).extractfile("a.bin"),
+            "tempfile.TemporaryFile": lambda: tempfile.TemporaryFile(),
+            "socket.makefile rb": lambda: socket.socketpair()[0].makefile("rb"),
+            "os.fdopen rb": lambda: os.fdopen(os.open(files["bin"], os.O_RDONLY), "rb"),
+            "subprocess pipe": lambda: (
+                subprocess.run(["cat", str(files["bin"])], stdout=subprocess.PIPE, check=True)
+                and io.BytesIO(BYTES)
+            ),
+            "sys.stdout.buffer": lambda: sys.stdout.buffer,
+        }
+    )
 
 
 def text_factories(files: dict[str, Path]) -> dict[str, Callable[[], Any]]:
-    return {
-        "open r": lambda: open(files["txt"]),
-        "io.StringIO": lambda: io.StringIO(TEXT),
-        "io.TextIOWrapper": lambda: io.TextIOWrapper(io.BytesIO(BYTES)),
-        "gzip rt": lambda: gzip.open(files["gz"], "rt"),
-        "tempfile.TemporaryFile w+": lambda: tempfile.TemporaryFile("w+"),
-        "socket.makefile r": lambda: socket.socketpair()[0].makefile("r"),
-        "sys.stdout": lambda: sys.stdout,
-    }
+    return _in_io_hierarchy(
+        {
+            "open r": lambda: open(files["txt"]),
+            "io.StringIO": lambda: io.StringIO(TEXT),
+            "io.TextIOWrapper": lambda: io.TextIOWrapper(io.BytesIO(BYTES)),
+            "gzip rt": lambda: gzip.open(files["gz"], "rt"),
+            "tempfile.TemporaryFile w+": lambda: tempfile.TemporaryFile("w+"),
+            "socket.makefile r": lambda: socket.socketpair()[0].makefile("r"),
+            "sys.stdout": lambda: sys.stdout,
+        }
+    )
 
 
 def duck_typed_factories(files: dict[str, Path]) -> dict[str, Callable[[], Any]]:

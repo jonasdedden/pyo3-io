@@ -5,6 +5,7 @@ instead. If `pyo3-file` ever fixes one of these, the test says so by failing.
 """
 
 import io
+import os
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -93,6 +94,7 @@ class TestStringIO:
 class TestFilenoPanics:
     """`AsRawFd` cannot fail, so `pyo3-file` panics where Python raises."""
 
+    @pytest.mark.skipif(os.name != "posix", reason="AsRawFd is Unix-only; the stand-in returns -1")
     def test_pyo3_file_panics(self) -> None:
         with pytest.raises(BaseException) as excinfo:
             ext.legacy_fileno(io.BytesIO(b"abc"))

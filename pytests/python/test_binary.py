@@ -236,10 +236,12 @@ class TestBoundAndDetachedForms:
 class TestDescriptorTraits:
     """Raw descriptor compatibility has no borrowed-lifetime guarantee and can panic."""
 
+    @pytest.mark.skipif(os.name != "posix", reason="AsRawFd is Unix-only; the stand-in returns -1")
     def test_as_raw_fd_gives_the_same_descriptor(self, tmp_binary: Path) -> None:
         with open(tmp_binary, "rb") as handle:
             assert ext.binary_fileno_via_as_raw_fd(handle) == handle.fileno()
 
+    @pytest.mark.skipif(os.name != "posix", reason="AsRawFd is Unix-only; the stand-in returns -1")
     def test_as_raw_fd_panics_where_fileno_errors(self) -> None:
         with pytest.raises(BaseException) as excinfo:
             ext.binary_fileno_via_as_raw_fd(io.BytesIO(b"abc"))

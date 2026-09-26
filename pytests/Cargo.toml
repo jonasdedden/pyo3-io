@@ -14,4 +14,7 @@ pyo3-io = { path = "..", features = ["experimental-inspect"] }
 pyo3-file = "=0.17.0"
 pyo3-filelike = "0.5.3"
 
+[build-dependencies]
+pyo3-build-config = "0.29.2"
+
 [workspace]

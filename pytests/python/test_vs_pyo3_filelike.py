@@ -9,6 +9,7 @@ Each test asserts both halves, so it fails if `pyo3-filelike` changes.
 """
 
 import io
+import os
 from pathlib import Path
 
 import pytest
@@ -118,6 +119,7 @@ class TestRejectionIsAPanic:
 class TestFilenoPanics:
     """`AsFd` cannot fail either, so this is the same panic `pyo3-file` has."""
 
+    @pytest.mark.skipif(os.name != "posix", reason="AsFd is Unix-only; the stand-in returns -1")
     def test_pyo3_filelike_panics(self) -> None:
         with pytest.raises(BaseException) as excinfo:
             ext.filelike_fileno(io.BytesIO(b"abc"))

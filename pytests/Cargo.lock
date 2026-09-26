@@ -124,6 +124,7 @@ name = "pyo3_io_tests"
 version = "0.1.0"
 dependencies = [
  "pyo3",
+ "pyo3-build-config",
  "pyo3-file",
  "pyo3-filelike",
  "pyo3-io",
