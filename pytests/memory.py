@@ -3,9 +3,9 @@
 import argparse
 import io
 import json
-from pathlib import Path
 import sys
 import tempfile
+from pathlib import Path
 from typing import BinaryIO
 
 
@@ -23,6 +23,7 @@ def peak_rss() -> int:
                 return int(count) * 1024
         raise RuntimeError("VmHWM is unavailable")
     import resource
+
     return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
 
 
@@ -31,7 +32,11 @@ def main() -> None:
     parser.add_argument("--profile", choices=("debug", "release"), default="release")
     parser.add_argument("--size", type=int, required=True)
     parser.add_argument("--source", choices=("BytesIO", "temporary-file"), required=True)
-    parser.add_argument("--implementation", choices=("typed-detached", "typed-bound", "legacy", "filelike"), required=True)
+    parser.add_argument(
+        "--implementation",
+        choices=("typed-detached", "typed-bound", "legacy", "filelike"),
+        required=True,
+    )
     args = parser.parse_args()
     if args.size <= 0:
         parser.error("size must be positive")
@@ -41,6 +46,7 @@ def main() -> None:
         return
     sys.path.insert(0, str(Path(__file__).resolve().parent / "python"))
     from _extension import install
+
     install(args.profile)
     import pyo3_io_tests as ext
 
@@ -48,7 +54,7 @@ def main() -> None:
     if args.source == "BytesIO":
         stream = io.BytesIO(b"x" * args.size)
     else:
-        stream = tempfile.TemporaryFile("w+b")
+        stream = tempfile.TemporaryFile("w+b")  # noqa: SIM115 - closed by `with stream` below
         # Do not retain a whole Python input allocation for the real-file case.
         block = b"x" * min(args.size, 65536)
         remaining = args.size

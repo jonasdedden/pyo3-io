@@ -4,11 +4,11 @@ import argparse
 import hashlib
 import json
 import os
-from pathlib import Path
 import subprocess
 import sys
 import sysconfig
 import tempfile
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 MODULE = "pyo3_io_tests"
@@ -20,8 +20,12 @@ def artifact(profile: str | None = None) -> Path:
     if profile not in ("debug", "release"):
         raise ValueError("profile must be debug or release")
     command = [
-        "cargo", "build", "--locked", "--message-format=json-render-diagnostics",
-        "--manifest-path", str(ROOT / "Cargo.toml"),
+        "cargo",
+        "build",
+        "--locked",
+        "--message-format=json-render-diagnostics",
+        "--manifest-path",
+        str(ROOT / "Cargo.toml"),
     ]
     if profile == "release":
         command.append("--release")

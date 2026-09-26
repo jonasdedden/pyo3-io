@@ -75,10 +75,10 @@ def binary_factories(files: dict[str, Path]) -> dict[str, Callable[[], Any]]:
         "tempfile.TemporaryFile": lambda: tempfile.TemporaryFile(),
         "socket.makefile rb": lambda: socket.socketpair()[0].makefile("rb"),
         "os.fdopen rb": lambda: os.fdopen(os.open(files["bin"], os.O_RDONLY), "rb"),
-        "subprocess pipe": lambda: subprocess.run(
-            ["cat", str(files["bin"])], stdout=subprocess.PIPE, check=True
-        )
-        and io.BytesIO(BYTES),
+        "subprocess pipe": lambda: (
+            subprocess.run(["cat", str(files["bin"])], stdout=subprocess.PIPE, check=True)
+            and io.BytesIO(BYTES)
+        ),
         "sys.stdout.buffer": lambda: sys.stdout.buffer,
     }
 
@@ -107,7 +107,7 @@ def duck_typed_factories(files: dict[str, Path]) -> dict[str, Callable[[], Any]]
 
 
 def _spooled(mode: str, payload: Any) -> Any:
-    handle = tempfile.SpooledTemporaryFile(mode=mode)
+    handle: tempfile.SpooledTemporaryFile[Any] = tempfile.SpooledTemporaryFile(mode=mode)  # noqa: SIM115 - the caller closes it
     handle.write(payload)
     handle.seek(0)
     return handle
@@ -170,9 +170,9 @@ class TestTheLadderRungs:
 
         class Watchful:
             def __init__(self) -> None:
-                self.calls: list[tuple[str, int]] = []
+                self.calls: list[tuple[str, int | None]] = []
 
-            def read(self, size: int = -1, /) -> bytes:
+            def read(self, size: int | None = -1, /) -> bytes:
                 self.calls.append(("read", size))
                 return BYTES[:size] if size is not None and size >= 0 else BYTES
 
@@ -204,11 +204,14 @@ class TestTheLadderRungs:
         assert ext.text_read_chars(ModeSaysBinaryButReadsText(), 4) == TEXT[:4]
         assert ext.binary_read_exactly(ModeSaysTextButReadsBytes(), 4) == BYTES[:4]
 
-    def test_the_real_codecs_readers_work_without_being_special_cased(self, files: dict[str, Path]) -> None:
+    def test_the_real_codecs_readers_work_without_being_special_cased(
+        self, files: dict[str, Path]
+    ) -> None:
         """The case that made `mode` untrustworthy, handled by not trusting `mode`."""
-        reader = codecs.getreader("utf-8")(open(files["bin"], "rb"))
-        assert reader.mode == "rb"  # it does say this
-        assert ext.text_read_chars(reader, 5) == TEXT[:5]  # and it is text anyway
+        with open(files["bin"], "rb") as raw:
+            reader = codecs.getreader("utf-8")(raw)
+            assert reader.mode == "rb"  # it does say this
+            assert ext.text_read_chars(reader, 5) == TEXT[:5]  # and it is text anyway
 
     def test_an_encoding_property_that_raises_does_not_break_classification(self) -> None:
         class Awkward:
@@ -234,7 +237,7 @@ class TestTheLadderRungs:
 class TestFallsBackToDuckTyping:
     """The objects no trustworthy signal covers. Each works in its correct kind."""
 
-    TEXTUAL = {"codecs.getreader", "SpooledTemporaryFile w+"}
+    TEXTUAL = frozenset({"codecs.getreader", "SpooledTemporaryFile w+"})
 
     def test_they_work_as_binary(self, files: dict[str, Path]) -> None:
         for name, factory in duck_typed_factories(files).items():
@@ -251,10 +254,12 @@ class TestFallsBackToDuckTyping:
             handle = duck_typed_factories(files)[name]()
             assert ext.text_read_chars(handle, 4) == TEXT[:4], name
 
-    def test_using_one_in_the_wrong_kind_is_caught_at_the_first_read(self, files: dict[str, Path]) -> None:
+    def test_using_one_in_the_wrong_kind_is_caught_at_the_first_read(
+        self, files: dict[str, Path]
+    ) -> None:
         """Not at the boundary, which is the price of not touching the object to find out."""
         handle = duck_typed_factories(files)["SpooledTemporaryFile wb+"]()
-        with pytest.raises(OSError, match="did not return str.*use a binary wrapper"):
+        with pytest.raises(OSError, match=r"did not return str.*use a binary wrapper"):
             ext.text_read_chars(handle, 4)
 
 
@@ -322,19 +327,19 @@ class TestDuckTypingIsTheFallback:
         """The case structure cannot settle, so the error has to carry the explanation."""
 
         class SilentlyText:
-            def read(self, size: int = -1, /) -> str:
+            def read(self, size: int | None = -1, /) -> str:
                 return TEXT[:size] if size is not None and size >= 0 else TEXT
 
-        with pytest.raises(OSError, match="did not return bytes.*use a text wrapper"):
+        with pytest.raises(OSError, match=r"did not return bytes.*use a text wrapper"):
             # intentional payload mismatch: caught at the first read, not at extraction
             ext.binary_read_exactly(SilentlyText(), 4)  # type: ignore[arg-type]  # pyright: ignore[reportArgumentType]
 
     def test_the_reverse_too(self) -> None:
         class SilentlyBinary:
-            def read(self, size: int = -1, /) -> bytes:
+            def read(self, size: int | None = -1, /) -> bytes:
                 return BYTES[:size] if size is not None and size >= 0 else BYTES
 
-        with pytest.raises(OSError, match="did not return str.*use a binary wrapper"):
+        with pytest.raises(OSError, match=r"did not return str.*use a binary wrapper"):
             # intentional payload mismatch: caught at the first read, not at extraction
             ext.text_read_chars(SilentlyBinary(), 4)  # type: ignore[arg-type]  # pyright: ignore[reportArgumentType]
 
@@ -376,7 +381,7 @@ class TestMisleadingInheritance:
                 self.written += data
                 return len(data)
 
-        with pytest.raises(TypeError, match="io.RawIOBase"):
+        with pytest.raises(TypeError, match=r"io\.RawIOBase"):
             # No ignore needed: statically this satisfies the text protocol; only the
             # runtime hierarchy check refuses it, which is exactly what is asserted here.
             ext.text_write(TextWriterInBinaryClothing(), TEXT)
@@ -533,7 +538,7 @@ class TestDirectionChecks:
             def readable(self) -> bool:
                 raise AssertionError("should never be called")
 
-            def read(self, size: int = -1, /) -> bytes:
+            def read(self, size: int | None = -1, /) -> bytes:
                 return BYTES[:size] if size is not None and size >= 0 else BYTES
 
         assert ext.binary_read_exactly(LiesAboutItself(), 4) == BYTES[:4]
@@ -545,7 +550,7 @@ class TestDirectionChecks:
             def readable(self) -> bool:
                 raise ValueError("cannot say")
 
-            def read(self, size: int = -1, /) -> bytes:
+            def read(self, size: int | None = -1, /) -> bytes:
                 return BYTES[:size] if size is not None and size >= 0 else BYTES
 
         assert ext.binary_read_exactly(Awkward(), 4) == BYTES[:4]

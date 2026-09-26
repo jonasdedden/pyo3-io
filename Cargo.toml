@@ -2,6 +2,7 @@
 name = "pyo3-io"
 version = "0.1.0"
 edition = "2021"
+rust-version = "1.83"
 description = "Python file-like objects whose payload kind and capabilities are part of their Rust type"
 license = "MIT OR Apache-2.0"
 exclude = ["pytests"]

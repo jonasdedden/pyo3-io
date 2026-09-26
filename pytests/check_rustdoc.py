@@ -7,21 +7,25 @@ neither pre-existing docs nor a configured cross-compilation target are used.
 """
 
 import os
-from pathlib import Path
 import re
 import shlex
 import shutil
 import subprocess
 import tempfile
 from html.parser import HTMLParser
+from pathlib import Path
 from urllib.parse import unquote, urljoin, urlsplit
 
 ROOT = Path(__file__).resolve().parents[1]
 CRATE = "pyo3_io"
 FAMILIES = {"PyBinaryIO", "PyTextIO", "BoundPyBinaryIO", "BoundPyTextIO"}
 COMMON = {
-    "PyBinaryRead", "PyBinaryWrite", "PyBinaryReadSeek",
-    "PyTextRead", "PyTextWrite", "PyTextReadSeek",
+    "PyBinaryRead",
+    "PyBinaryWrite",
+    "PyBinaryReadSeek",
+    "PyTextRead",
+    "PyTextWrite",
+    "PyTextReadSeek",
 }
 CONSTRUCTORS = {"new", "py_new"}
 OWNED_COMMON = CONSTRUCTORS | {"bind", "into_bound", "as_py_object", "into_py_object"}
@@ -86,7 +90,7 @@ class Page(HTMLParser):
         if tag == "dt":
             self.in_term = True
         if tag == "meta" and (attributes.get("http-equiv") or "").lower() == "refresh":
-            match = re.search(r"url\s*=\s*(.+)", attributes.get("content") or "", re.I)
+            match = re.search(r"url\s*=\s*(.+)", attributes.get("content") or "", re.IGNORECASE)
             if match:
                 self.redirect = match.group(1).strip().strip("'\"")
         if self.main and re.fullmatch(r"h[1-6]", tag):
@@ -188,10 +192,10 @@ class Docs:
 def catalog_names(bound: bool = False) -> set[str]:
     # Deliberately independent of the Rust macro table and any private generator.
     return {
-        ("BoundPy" if bound else "Py") + kind
+        ("BoundPy" if bound else "Py")
+        + kind
         + "".join(
-            cap for bit, cap in enumerate(("Read", "Write", "Seek", "Fileno"))
-            if mask & (1 << bit)
+            cap for bit, cap in enumerate(("Read", "Write", "Seek", "Fileno")) if mask & (1 << bit)
         )
         for kind in ("Binary", "Text")
         for mask in range(1, 16)
@@ -205,7 +209,9 @@ def check_summary(docs: Docs, name: str, capabilities: tuple[str, ...]) -> None:
     # Canonical catalog pages; the six common aliases are also inlined at the root.
     path = subdir / f"type.{name}.html"
     page = docs.page(path)
-    require("Available operations" in page.headings, f"{name}: missing Available operations heading")
+    require(
+        "Available operations" in page.headings, f"{name}: missing Available operations heading"
+    )
     operations: list[tuple[str, str]] = []
     for href, section in page.links:
         if section == "Available operations":
@@ -226,7 +232,9 @@ def check_summary(docs: Docs, name: str, capabilities: tuple[str, ...]) -> None:
     require(methods <= allowed, f"{name}: unrequested summary methods {methods - allowed}")
     for target_name, method in operations:
         expected = shared if method in common else family
-        require(target_name == expected, f"{name}: {method} links to {target_name}, expected {expected}")
+        require(
+            target_name == expected, f"{name}: {method} links to {target_name}, expected {expected}"
+        )
     if bound:
         require(not (CONSTRUCTORS & methods), f"{name}: bound alias claims constructors")
 
@@ -248,9 +256,7 @@ def check_docs(root: Path, unix: bool) -> None:
     docs.methods("struct.BoundPyIO.html", BOUND_COMMON | {"fileno"})
     for name in sorted(FAMILIES):
         binary = "Binary" in name
-        expected = (
-            set().union(*BINARY_REQUIRED.values()) if binary else set().union(*TEXT.values())
-        )
+        expected = set[str]().union(*(BINARY_REQUIRED if binary else TEXT).values())
         page = docs.methods(f"type.{name}.html", expected)
         for trait in ("Read", "Write", "Seek"):
             present = any(anchor.startswith(f"impl-{trait}-for-") for anchor in page.ids)
@@ -282,7 +288,9 @@ def check_docs(root: Path, unix: bool) -> None:
             if target is not None
         }
         require((shared, "method.fileno") in links, f"{name}: missing shared fileno link")
-        clone_links = {(target, fragment) for target, fragment in links if fragment == "method.try_clone_fd"}
+        clone_links = {
+            (target, fragment) for target, fragment in links if fragment == "method.try_clone_fd"
+        }
         require(
             clone_links == ({(shared, "method.try_clone_fd")} if unix else set()),
             f"{name}: incorrect Unix-only try_clone_fd links: {clone_links}",
@@ -299,7 +307,9 @@ def main() -> None:
     require(host, "rustc -vV did not report a host target")
     # `require` raises, but the checkers cannot see that; spell out the narrowing.
     assert host is not None
-    cfg = subprocess.check_output(["rustc", "--print", "cfg", "--target", host], cwd=ROOT, text=True)
+    cfg = subprocess.check_output(
+        ["rustc", "--print", "cfg", "--target", host], cwd=ROOT, text=True
+    )
     unix = "unix" in cfg.splitlines()
     target_parent = ROOT / "target"
     target_parent.mkdir(exist_ok=True)
@@ -322,9 +332,16 @@ def main() -> None:
             label = "all features" if all_features else "default features"
             print(f"Checking rustdoc ({label}, host {host})", flush=True)
             command = [
-                "cargo", "doc", "--locked", "--no-deps",
-                "--manifest-path", str(ROOT / "Cargo.toml"),
-                "--target", host, "--target-dir", str(target),
+                "cargo",
+                "doc",
+                "--locked",
+                "--no-deps",
+                "--manifest-path",
+                str(ROOT / "Cargo.toml"),
+                "--target",
+                host,
+                "--target-dir",
+                str(target),
             ]
             if all_features:
                 command.append("--all-features")

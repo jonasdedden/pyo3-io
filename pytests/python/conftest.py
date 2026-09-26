@@ -8,7 +8,7 @@ from _extension import install
 ROOT = Path(__file__).resolve().parent.parent
 install()
 
-import pytest  # noqa: E402
+import pytest
 
 
 @pytest.fixture(scope="session")

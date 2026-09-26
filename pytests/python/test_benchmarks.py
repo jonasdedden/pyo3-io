@@ -1,4 +1,5 @@
 """Contract tests for the benchmark helpers; no pytest dependency."""
+
 import contextlib
 import importlib.util
 import io
@@ -112,14 +113,20 @@ class BenchmarkTests(unittest.TestCase):
         assert spec.loader is not None
         bench = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(bench)
-        calls = []
+        calls: list[str] = []
         output = io.StringIO()
         with contextlib.redirect_stdout(output):
-            bench.report("bad", {"bad-adapter": (
-                lambda: None,
-                lambda: calls.append("timed"),
-                lambda: bench.check_equal(b"wrong", b"expected"),
-            )}, SimpleNamespace(warmup=1, repeats=2, iterations=2))
+            bench.report(
+                "bad",
+                {
+                    "bad-adapter": (
+                        lambda: None,
+                        lambda: calls.append("timed"),
+                        lambda: bench.check_equal(b"wrong", b"expected"),
+                    )
+                },
+                SimpleNamespace(warmup=1, repeats=2, iterations=2),
+            )
         self.assertEqual(calls, [])
         self.assertIn("UNSUPPORTED/BROKEN", output.getvalue())
         self.assertNotIn(" us ", output.getvalue())

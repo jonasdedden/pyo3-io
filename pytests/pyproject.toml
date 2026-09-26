@@ -1,0 +1,52 @@
+# Tooling for the validation suite; this directory is not a Python package.
+[project]
+name = "pyo3-io-tests"
+version = "0"
+requires-python = ">=3.11"
+
+[dependency-groups]
+dev = ["pytest", "ruff", "mypy", "basedpyright"]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+testpaths = ["python"]
+
+[tool.ruff]
+line-length = 100
+# check_bad.py fails on purpose; the stub snapshot must match the generator byte for byte.
+extend-exclude = ["typecheck/check_bad.py", "python/expected_stubs.pyi", "stubs"]
+
+[tool.ruff.lint]
+extend-select = ["I", "B", "SIM", "RUF"]
+# `with open(...)` around `with pytest.raises(...)` keeps the raises scope to the one call.
+ignore = ["SIM117"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["pyo3_io_tests", "_extension", "helpers"]
+
+# The type checkers see the extension through the checked-in stub snapshot
+# (stubs/pyo3_io_tests.pyi links to python/expected_stubs.pyi).
+[tool.mypy]
+strict = true
+mypy_path = ["stubs", "python"]
+files = ["."]
+exclude = ["^typecheck/check_bad\\.py$", "^target/"]
+
+[tool.basedpyright]
+include = ["."]
+exclude = ["typecheck/check_bad.py", "target", "**/__pycache__", ".venv"]
+stubPath = "stubs"
+extraPaths = ["python"]
+pythonVersion = "3.11"
+# The extension is only built at test time; its types come from the stub snapshot.
+reportMissingModuleSource = "none"
+# Idioms these flag are pervasive and deliberate in test doubles and benchmarks.
+reportAny = "none"
+reportExplicitAny = "none"
+reportUnusedCallResult = "none"
+reportUnannotatedClassAttribute = "none"
+reportImplicitOverride = "none"
+reportUnusedParameter = "none"
+reportImplicitStringConcatenation = "none"

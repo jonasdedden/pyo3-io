@@ -104,4 +104,6 @@ class TestStubContent:
         comparison = ("def legacy_", "def filelike_", "def bench_")
         for line in stub_source.splitlines():
             if line.startswith("def ") and not line.startswith(comparison):
-                assert ": Supports" in line or ": int" in line or ": bytes" in line or ": str" in line, line
+                assert (
+                    ": Supports" in line or ": int" in line or ": bytes" in line or ": str" in line
+                ), line

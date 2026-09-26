@@ -63,11 +63,11 @@ class TestStringIO:
 
     @staticmethod
     def _failures(call: Callable[[Any], object]) -> list[int]:
-        broken = []
+        broken: list[int] = []
         for n in TestStringIO.LENGTHS:
             try:
                 call(io.StringIO("x" * n))
-            except Exception:
+            except Exception:  # noqa: BLE001 - any failure counts as broken
                 broken.append(n)
         return broken
 

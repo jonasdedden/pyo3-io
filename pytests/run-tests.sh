@@ -34,6 +34,10 @@ cargo clippy --manifest-path "$crate/Cargo.toml" --all-targets -- -D warnings
 cargo clippy --manifest-path "$crate/Cargo.toml" --all-features --all-targets -- -D warnings
 cargo clippy --manifest-path "$here/Cargo.toml" --all-targets -- -D warnings
 
+step "ruff / mypy / basedpyright"
+(cd "$here" && uv run --locked ruff check . && uv run --locked ruff format --check .)
+(cd "$here" && uv run --locked mypy && uv run --locked basedpyright)
+
 step "cargo test: default and all features"
 cargo test --manifest-path "$crate/Cargo.toml"
 cargo test --manifest-path "$crate/Cargo.toml" --all-features
@@ -58,7 +62,7 @@ if (( stubs )); then
 fi
 
 step "pytest: runtime behaviour, comparisons, stub snapshot"
-(cd "$here/python" && uvx --with pytest pytest -q)
+(cd "$here" && uv run --locked pytest -q)
 
 if (( stubs )); then
     step "pyright: accepted and rejected contracts"

@@ -6,9 +6,9 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from helpers import DuckBinaryReader, DuckTextReader
 
 import pyo3_io_tests as ext
+from helpers import DuckBinaryReader, DuckTextReader
 
 
 class TestModeGuard:
@@ -46,7 +46,7 @@ class TestModeGuard:
             ext.text_read_all(factory())
 
     def test_text_rejection_suggests_textiowrapper(self) -> None:
-        with pytest.raises(TypeError, match="io.TextIOWrapper"):
+        with pytest.raises(TypeError, match=r"io\.TextIOWrapper"):
             # intentional wrong-kind rejection
             ext.text_read_all(io.BytesIO(b"abc"))  # type: ignore[arg-type]  # pyright: ignore[reportArgumentType]
 
@@ -141,6 +141,6 @@ class TestCapabilityChecks:
 
         class ReadOnly:
             def read(self, size: int = -1, /) -> bytes:
-                return b"" if size else b""
+                return b""
 
         assert ext.binary_read_all(ReadOnly()) == b""

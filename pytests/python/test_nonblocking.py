@@ -122,9 +122,8 @@ class TestRealNonBlockingPipe:
     def pipe(self) -> Iterator[tuple[io.FileIO, int]]:
         read_fd, write_fd = os.pipe()
         os.set_blocking(read_fd, False)
-        handle = open(read_fd, "rb", buffering=0)
-        yield handle, write_fd
-        handle.close()
+        with open(read_fd, "rb", buffering=0) as handle:
+            yield handle, write_fd
         os.close(write_fd)
 
     def test_not_ready_then_ready(self, pipe: tuple[io.FileIO, int]) -> None:

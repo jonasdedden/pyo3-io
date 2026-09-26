@@ -10,7 +10,6 @@ Each test asserts both halves, so it fails if `pyo3-filelike` changes.
 
 import io
 from pathlib import Path
-from typing import Any
 
 import pytest
 
@@ -134,9 +133,8 @@ class TestNoCapabilityTyping:
     """`PyBinaryFile` is `Read + Write + Seek` whatever the function needed."""
 
     def test_writing_a_read_only_handle_reaches_runtime(self, latin1_file: Path) -> None:
-        with open(latin1_file, "rb") as handle:
-            with pytest.raises(Exception) as excinfo:
-                ext.filelike_write(handle, b"x")
+        with open(latin1_file, "rb") as handle, pytest.raises(Exception) as excinfo:
+            ext.filelike_write(handle, b"x")
         assert "write" in str(excinfo.value)
 
     def test_typed_cannot_express_the_mistake(self) -> None:

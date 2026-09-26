@@ -38,7 +38,7 @@ class DuckBinaryWriter:
         self.chunks: list[bytes] = []
         self.flushes = 0
 
-    def write(self, data: bytes, /) -> int:
+    def write(self, data: object, /) -> int:
         if not isinstance(data, bytes):
             raise TypeError(f"expected bytes, got {type(data).__name__}")
         self.chunks.append(data)
@@ -57,7 +57,7 @@ class DuckTextWriter:
         self.chunks: list[str] = []
         self.flushes = 0
 
-    def write(self, data: str, /) -> int:
+    def write(self, data: object, /) -> int:
         if not isinstance(data, str):
             raise TypeError(f"expected str, got {type(data).__name__}")
         self.chunks.append(data)

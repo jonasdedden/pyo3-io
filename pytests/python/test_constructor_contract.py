@@ -22,7 +22,9 @@ def test_noncallable_read_and_write_are_rejected(value: Any) -> None:
 
 def test_seek_tell_and_fileno_must_also_be_callable() -> None:
     class Stream:
-        read = lambda self, size: b""
+        def read(self, size: int, /) -> bytes:
+            return b""
+
         seek = None
         fileno = None
 
@@ -34,8 +36,12 @@ def test_seek_tell_and_fileno_must_also_be_callable() -> None:
         ext.binary_fileno(Stream())  # type: ignore[arg-type]  # pyright: ignore[reportArgumentType]
 
     class TextStream:
-        read = lambda self, size: ""
-        seek = lambda self, offset, whence: 0
+        def read(self, size: int, /) -> str:
+            return ""
+
+        def seek(self, offset: int, whence: int, /) -> int:
+            return 0
+
         tell = None
 
     with pytest.raises(TypeError, match=r"\.tell\(\)"):
@@ -51,7 +57,11 @@ def test_dynamic_callables_are_accepted_without_probes_or_unrequested_lookups() 
         def __getattr__(self, name: str) -> Any:
             self.lookups.append(name)
             if name == "read":
-                return lambda size: pytest.fail("constructor called read")
+
+                def read(size: int, /) -> bytes:
+                    pytest.fail("constructor called read")
+
+                return read
             raise AssertionError(f"unrequested lookup: {name}")
 
     stream = Stream()
@@ -64,7 +74,11 @@ def test_dynamic_callables_are_accepted_without_probes_or_unrequested_lookups() 
         pass
 
     instance = InstanceReader()
-    setattr(instance, "read", lambda size: b"abc"[:size])
+
+    def read(size: int, /) -> bytes:
+        return b"abc"[:size]
+
+    setattr(instance, "read", read)  # noqa: B010 - checkers must not see it
     # intentional: the instance attribute is invisible to both checkers
     assert ext.binary_read_exactly(instance, 2) == b"ab"  # type: ignore[arg-type]  # pyright: ignore[reportArgumentType]
 

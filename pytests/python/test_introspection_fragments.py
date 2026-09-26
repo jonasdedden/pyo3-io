@@ -35,7 +35,9 @@ def hint(name: str) -> dict[str, Any]:
 
 def nullable(value: dict[str, Any]) -> dict[str, Any]:
     return {
-        "type": "binop", "left": value, "op": "bitor",
+        "type": "binop",
+        "left": value,
+        "op": "bitor",
         "right": {"type": "constant", "kind": "none"},
     }
 
@@ -80,9 +82,8 @@ def test_linked_protocol_matches_its_capabilities(kind: str, bits: int) -> None:
             "name": method,
             "parent": parent,
             "arguments": {
-                "posonlyargs": [{"name": "self"}] + [
-                    {"name": name, "annotation": annotation} for name, annotation in arguments
-                ],
+                "posonlyargs": [{"name": "self"}]
+                + [{"name": name, "annotation": annotation} for name, annotation in arguments],
             },
             "returns": returns,
         }

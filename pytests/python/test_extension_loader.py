@@ -1,25 +1,34 @@
 """Artifact discovery follows Cargo output, including configured targets."""
 
 import json
-from pathlib import Path
 import subprocess
 import sys
+from collections.abc import Callable
+from pathlib import Path
 
 import pytest
 
 import _extension
 
 
-def cargo_artifact(built: Path) -> str:
-    return json.dumps({
-        "reason": "compiler-artifact",
-        "target": {
-            "name": _extension.MODULE,
-            "crate_types": ["cdylib"],
-            "src_path": str(_extension.ROOT / "src/lib.rs"),
-        },
-        "filenames": [str(built), str(built.with_suffix(".lib"))],
-    })
+def fake_cargo(built: Path) -> Callable[..., str]:
+    """A `subprocess.check_output` stand-in whose Cargo output reports `built`."""
+    output = json.dumps(
+        {
+            "reason": "compiler-artifact",
+            "target": {
+                "name": _extension.MODULE,
+                "crate_types": ["cdylib"],
+                "src_path": str(_extension.ROOT / "src/lib.rs"),
+            },
+            "filenames": [str(built), str(built.with_suffix(".lib"))],
+        }
+    )
+
+    def check_output(*args: object, **kwargs: object) -> str:
+        return output
+
+    return check_output
 
 
 @pytest.mark.parametrize(
@@ -40,22 +49,14 @@ def test_artifact_location(
     built.write_bytes(b"artifact")
     # `_extension.sys` is the `sys` module itself, so patching it patches the same object.
     monkeypatch.setattr(sys, "platform", platform)
-    monkeypatch.setattr(
-        subprocess,
-        "check_output",
-        lambda *args, **kwargs: cargo_artifact(built),
-    )
+    monkeypatch.setattr(subprocess, "check_output", fake_cargo(built))
     assert _extension.artifact(profile) == built
     monkeypatch.setenv("PYTESTS_PROFILE", profile)
     assert _extension.artifact() == built
 
 
 def test_missing_artifact_is_an_error(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    monkeypatch.setattr(
-        subprocess,
-        "check_output",
-        lambda *args, **kwargs: cargo_artifact(tmp_path / "missing.so"),
-    )
+    monkeypatch.setattr(subprocess, "check_output", fake_cargo(tmp_path / "missing.so"))
     with pytest.raises(RuntimeError, match="exactly one built test extension"):
         _extension.artifact("release")
 
@@ -68,7 +69,11 @@ def test_unknown_profile_is_rejected() -> None:
 def test_staged_libraries_are_immutable(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     built = tmp_path / "release/libtest.so"
     built.parent.mkdir()
-    monkeypatch.setattr(_extension, "artifact", lambda profile: built)
+
+    def artifact(profile: str | None = None) -> Path:
+        return built
+
+    monkeypatch.setattr(_extension, "artifact", artifact)
     monkeypatch.delitem(sys.modules, _extension.MODULE, raising=False)
     monkeypatch.setattr(sys, "path", list(sys.path))
     built.write_bytes(b"original")

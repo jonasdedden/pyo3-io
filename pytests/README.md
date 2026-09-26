@@ -8,7 +8,7 @@ python3 pytests/check_rustdoc.py
 ./pytests/run-tests.sh
 ```
 
-The runner defaults to standard Rust and Python validation, without a custom stub generator, and checks freshly rendered rustdoc pages and their links. Opt in to stub generation/type checking or benchmarks:
+The Python tools (pytest, ruff, mypy, basedpyright) are pinned in `pyproject.toml` and `uv.lock`; their settings live there too, so `uv run mypy` in `pytests/` is the same check CI runs. The runner defaults to standard Rust and Python validation, without a custom stub generator, and checks freshly rendered rustdoc pages and their links. Opt in to stub generation/type checking or benchmarks:
 
 ```sh
 PYO3_INTROSPECTION=/path/to/pyo3-introspection ./pytests/run-tests.sh --stubs
