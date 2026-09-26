@@ -105,7 +105,7 @@ jobs:
         working-directory: pytests
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v10
+      - uses: astral-sh/setup-uv@v10.2.0
       - run: uv run --locked ruff check --output-format github .
       - run: uv run --locked ruff format --check .
 
@@ -121,7 +121,7 @@ jobs:
         working-directory: pytests
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v10
+      - uses: astral-sh/setup-uv@v10.2.0
       # Both read their settings, including mypy's `strict = true`, from pytests/pyproject.toml.
       - run: uv run --locked ${{ matrix.checker }}
 
@@ -144,7 +144,7 @@ jobs:
         with:
           workspaces: pytests
           key: py${{ matrix.python }}
-      - uses: astral-sh/setup-uv@v10
+      - uses: astral-sh/setup-uv@v10.2.0
         with:
           python-version: ${{ matrix.python }}
       # conftest.py builds the test extension with Cargo against this interpreter.
