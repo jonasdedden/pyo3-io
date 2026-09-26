@@ -1,167 +1,233 @@
 # pyo3-typed-io
 
-Python file-like objects with **payload kind** and **required capabilities** in their Rust type. Binary streams implement the appropriate `std::io` traits; text streams have a character-counted API and opaque seek positions.
-
-## API guide
-
-| Task | Start with | Method reference |
-|---|---|---|
-| Read or write bytes | [`PyBinaryRead`], [`PyBinaryWrite`] | [`PyBinaryIO`] |
-| Read or write text | [`PyTextRead`], [`PyTextWrite`] | [`PyTextIO`] |
-| Read and seek | [`PyBinaryReadSeek`], [`PyTextReadSeek`] | The corresponding binary/text reference |
-| Construct, bind, or access the Python object | Any owned alias | [`PyIO`] |
-| Work while already attached to Python | Obtain a bound form with `bind` or `into_bound` | [`BoundPyBinaryIO`], [`BoundPyTextIO`] |
-
-The complete owned catalog is in [`aliases`]; explicit lifetime-bearing names are in [`aliases::bound`]. Every alias is also importable from the crate root. Each convenience alias page lists **Available operations** and links to the relevant method reference, because rustdoc does not automatically copy implementations onto type aliases.
-
-## Quickstart
-
-```toml
-[dependencies]
-pyo3 = "0.29.2"
-pyo3-typed-io = "0.1.0"
-```
-
-Use named aliases directly as PyO3 arguments; they implement `FromPyObject`.
+Accept Python file objects in Rust, **typed by what they hold and what you need from them**.
 
 ```rust,no_run
 use pyo3::prelude::*;
-use pyo3_typed_io::{PyBinaryRead, PyTextReadSeek};
+use pyo3_typed_io::{PyBinaryRead, PyTextWrite};
 use std::io::Read;
 
 #[pyfunction]
-fn read_bytes(mut source: PyBinaryRead) -> PyResult<Vec<u8>> {
+fn checksum(mut source: PyBinaryRead) -> PyResult<u32> {
     let mut bytes = Vec::new();
-    source.read_to_end(&mut bytes)?;
-    Ok(bytes)
+    source.read_to_end(&mut bytes)?; // it's a std::io::Read
+    Ok(bytes.iter().map(|&b| u32::from(b)).sum())
 }
 
 #[pyfunction]
-fn preview(mut source: PyTextReadSeek) -> PyResult<String> {
-    let position = source.tell()?;
-    let text = source.read_chars(80)?;
-    source.seek_to(&position)?;
-    Ok(text)
+fn greet(mut out: PyTextWrite, name: &str) -> PyResult<()> {
+    out.write_all_str(&format!("Hello, {name}!\n"))?; // text in, text out
+    Ok(())
 }
 ```
 
-Python callers can pass `io.BytesIO` to `read_bytes` and `io.StringIO` to `preview`, or compatible real files and duck-typed objects. The preview restores the position on success; it is not a transactional operation.
+```python
+# ✅ the right mode and capability
+checksum(open("data.bin", "rb"))
+checksum(io.BytesIO(b"abc"))
+greet(sys.stdout, "world")
+greet(io.StringIO(), "world")
 
-For manual construction, use `PyBinaryRead::py_new(bound_object)` or `PyBinaryRead::new(owned_object)`. A `PyIO` owns a Python reference and attaches to Python for operations. `file.bind(py)` produces a `BoundPyIO` for repeated operations while already attached; `into_bound(py)` and `unbind()` transfer between forms. Cloning a wrapper references the same Python object, not an independent stream.
+# ❌ text where bytes are expected, and the other way round
+checksum(open("data.txt"))        # TypeError: expected a binary file-like object, got the text object TextIOWrapper ...
+greet(io.BytesIO(), "world")      # TypeError: expected a text file-like object, got the binary object BytesIO ...
 
-## Types and construction
+# ❌ missing capability: writing to a read-only file, reading a write-only one
+greet(open("data.txt"), "world")  # TypeError: object of type TextIOWrapper reports writable() is False ...
+checksum(open("out.bin", "wb"))   # TypeError: object of type BufferedWriter reports readable() is False ...
 
-Aliases are spelled `Py` + `Binary` or `Text` + any of `Read`, `Write`, `Seek`, and `Fileno`, in that order — for example, `PyBinaryReadWriteSeek` or `PyTextReadFileno`. Only the requested operations exist on the value: a `PyBinaryRead` cannot be written to, and no text wrapper implements `std::io` traits. These flags are requirements, not guarantees: the object can still close, change, or fail at runtime.
+# ❌ not a file at all, or already closed
+checksum(object())                # TypeError: object of type object has no .read() method ...
+closed = open("data.bin", "rb")
+closed.close()
+checksum(closed)                  # ValueError: I/O operation on closed file
+```
 
-Construction rejects objects of the wrong payload kind (`io.TextIOBase` vs `io.RawIOBase`/`io.BufferedIOBase`), objects missing a required method (or exposing a noncallable one), known-closed streams, and streams whose `readable()`/`writable()`/`seekable()` query refuses the capability. Anything else is taken at its word, with the actual payload validated on every read. Failures surface as `TypeError` (`ValueError` for a closed stream). There is no way to skip classification: if a class inherits from the wrong half of the `io` hierarchy, fix the base; if it is someone else's, wrap it in a plain delegating object instead of inheriting.
+## Comparison to `pyo3-file` and `pyo3-filelike`
 
-Choose the encoding on the Python side: open a binary stream when Rust needs the original bytes, or wrap it with `io.TextIOWrapper(..., encoding=...)` when Rust needs text.
+Both work well for the common case: a binary file opened with `"rb"`. The differences show up at
+the edges: text streams, wrong arguments, objects without a file descriptor.
 
-## I/O contracts
+|  | **pyo3-typed-io** | [`pyo3-file`](https://crates.io/crates/pyo3-file) 0.17 | [`pyo3-filelike`](https://crates.io/crates/pyo3-filelike) 0.5 |
+|---|:---:|:---:|:---:|
+| **Correctness** | | | |
+| Read an `io.StringIO` | ✅ | ❌ fails for most lengths | ✅ |
+| Write non-ASCII text | ✅ | 💥 panics | — no text writer |
+| Text file passed where bytes are expected | ✅ `TypeError` up front | ⚠️ silently re-encoded to UTF-8 | 💥 panics, or fails on first read |
+| Seek in a text stream | ✅ `tell` / `seek_to` | ⚠️ as byte offsets | — |
+| **Stability** | | | |
+| `fileno()` on an object without one | ✅ `OSError` | 💥 panics | 💥 panics |
+| Bytes written to a text stream | ✅ `TypeError` up front | 💥 panics on non-UTF-8 | — |
+| **Type safety** | | | |
+| Compiler rejects Rust code that treats text as bytes | ✅ | ❌ | ✅ |
+| Compiler rejects Rust code that writes to a read-only argument | ✅ | ❌ | ❌ |
+| Typed Python stubs | ✅ a precise `Protocol` per signature (opt-in) | `Any` | `Any` |
+| **Features** | | | |
+| `std::io::{Read, Write, Seek}` for binary | ✅ | ✅ | ✅ |
+| Text API counted in characters | ✅ `read_chars`, `write_str` | ❌ | ❌ |
+| **Performance** (1 MiB, vs. pyo3-typed-io) | | | |
+| `read_to_end` | ✅ | 1.3–2.1× slower | 1.3–2.1× slower |
+| Peak memory, 16 MiB `read_to_end` | ✅ +18 MiB | +32 MiB | +32 MiB |
+| Small (64 B) reads and writes | ✅ | ✅ about the same | 1.5–2× slower |
+| Text: read a whole stream | ✅ | ❌ fails | 2.2–2.5× slower |
+| Constructing a wrapper | 🐌 0.36 µs (type and mode checks at creation) | ✅ 0.06 µs | ✅ 0.05–0.19 µs |
 
-### Binary
+The failure cases are pinned by tests that run the crates side by side
+([`test_vs_pyo3_file.py`](pytests/python/test_vs_pyo3_file.py),
+[`test_vs_pyo3_filelike.py`](pytests/python/test_vs_pyo3_filelike.py)) and fail if either crate
+changes its behaviour. Performance numbers come from `pytests/bench.py`; the full results are in
+[pytests/README.md](pytests/README.md#measured-results).
 
-* `Read` calls Python `read(size)` with a bounded byte count. Python `bytes` use a borrowed `PyBytes` fast path before copying into the Rust destination. Other buffer exporters are snapshotted with `memoryview(...).tobytes()`, preserving raw buffer bytes rather than converting individual elements. A `list[int]` is not a buffer and is rejected.
-* Results larger than the requested byte count are rejected. Bulk `read_to_end`/`read_to_string` keep the standard Rust contract — bounded positive-size reads (at most 64 KiB each), `Interrupted` retries, and data read before an error kept — but append straight from each returned `bytes` instead of zero-filling a buffer first; there is no universal `read(-1)` shortcut. Binary `read_to_string` performs Rust UTF-8 validation, with std's rules for invalid data.
-* `Write` passes Python `bytes`, honors short-write counts, and rejects counts larger than the input. `write_all` uses the usual retry behavior.
-* `Seek` uses byte-oriented `SeekFrom`; positions and offsets must fit the supported integer ranges.
+## Usage
 
-### Text
+### Pick a type by name
 
-* `read_chars(n)` requests at most `n` Unicode characters, not bytes or grapheme clusters. It may return fewer and rejects an overlong result.
-* `read_to_string()` collects text through bounded positive-size reads. On error, consumed text is not returned; nonblocking callers should use `read_chars` and retain each successful chunk before retrying.
-* `write_str()` returns the number of characters accepted. `write_all_str()` handles short writes on character boundaries and rejects zero progress or impossible counts.
-* `tell()` returns a `PyTextPosition` holding an arbitrary-size Python integer. `seek_to(&position)` restores that opaque cookie; `rewind()` and `seek_to_end()` also return `PyTextPosition`. Cookies are not byte offsets and should be used with the stream that produced them, subject to its positioning rules.
+Every type name is built from three parts:
 
-Text crosses into Rust as UTF-8 `String`/`str`; this is not conversion-free. Python strings may contain surrogate values that Rust UTF-8 strings cannot represent, so not every Python `str` can be extracted successfully.
+```text
+Py ─┬─ Binary ─┬── Read ── Write ── Seek ── Fileno
+    └─ Text ───┘   ╰─── one or more, in order ───╯
+    exactly one
+```
 
-For both kinds, an empty read result is EOF; `None` from `read` or `write` means `WouldBlock`, not EOF or successful completion. Python I/O exceptions propagate through the error conversions. Invalid payloads and overlong/impossible counts are errors rather than silently truncated data. `flush()` is optional: absence is a no-op, while an existing method's failure is reported. If a Python `BlockingIOError` reports a positive `characters_written`, it becomes a validated short-write result (bytes for binary, characters for text), so callers do not resend input that Python already accepted.
+So `PyBinaryRead`, `PyTextReadSeek`, `PyBinaryReadWriteSeek`, `PyTextWriteFileno`, … all exist.
+Only the methods you asked for are available. The full list is in [`aliases`].
 
-## File descriptors
+All of them work directly as `#[pyfunction]` arguments. Python callers can pass real files,
+`io.BytesIO`/`io.StringIO`, or any object with the right methods.
 
-With `Fileno`, `fileno()` safely returns `io::Result<i32>`: a raw number, **not** a borrowed descriptor or a lifetime guarantee. Wrappers deliberately do not implement `AsFd`. The Unix compatibility `AsRawFd` implementation may panic if `fileno()` fails; prefer the fallible method.
+### Binary streams are `std::io`
 
-On Unix, `try_clone_fd() -> io::Result<OwnedFd>` duplicates the descriptor with `fcntl(F_DUPFD_CLOEXEC)`. The owned, close-on-exec duplicate survives closing the Python stream. It shares the OS file offset and bypasses Python buffering, so coordinate/flush buffered I/O before mixing interfaces. Callers must synchronize concurrent close or descriptor reuse to ensure the intended resource is duplicated; a Python reference alone does not prevent that race.
+Binary wrappers implement `Read`, `Write` and `Seek`, so they plug into any Rust crate that
+takes a reader or writer:
 
-## Optional Python annotations
+```rust,no_run
+use pyo3::prelude::*;
+use pyo3_typed_io::{PyBinaryRead, PyBinaryWrite};
+use std::io::{BufRead, BufReader, Write};
 
-`experimental-inspect` supplies structural capability protocols to PyO3's experimental inspection metadata. For example, a `PyTextReadSeek` argument describes `read(size) -> str | None`, `seek(offset, whence) -> int`, and `tell() -> int`.
+#[pyfunction]
+fn count_lines(source: PyBinaryRead) -> PyResult<usize> {
+    Ok(BufReader::new(source).lines().count())
+}
 
-Generating usable stubs still requires a custom `pyo3-introspection` generator with `attach_to_root` support; enabling the feature alone is not sufficient. Static protocols describe expected signatures, not stream state, payload correctness, or all dynamic attribute behavior, so static and runtime acceptance need not coincide.
+#[pyfunction]
+fn copy(mut from: PyBinaryRead, mut to: PyBinaryWrite) -> PyResult<u64> {
+    let copied = std::io::copy(&mut from, &mut to)?;
+    to.flush()?;
+    Ok(copied)
+}
+```
 
-## Alternatives and performance
+### Text streams count characters
 
-The comparison fixtures use published `pyo3-file` **0.17.0** and `pyo3-filelike` **0.5.3**:
+Text wrappers deliberately don't implement `std::io`. Python text is characters, not bytes, so
+they get their own small API:
 
-| Design | `pyo3-file` | `pyo3-filelike` | `pyo3-typed-io` |
-|---|---|---|---|
-| Payload model | One runtime-adapting wrapper | Separate binary/text wrappers | Separate binary/text types |
-| Construction | Runtime capability options; also implements `FromPyObject` | Explicit constructors, mode-based classification | Typed requirements; hierarchy rejection and callable checks |
-| Rust text interface | Byte-oriented I/O adapter | UTF-8 byte-oriented adapter | Character API and opaque seek cookies |
-| Capabilities in Rust type | No | No | Yes |
+```rust,no_run
+use pyo3::prelude::*;
+use pyo3_typed_io::{PyTextRead, PyTextReadSeek, PyTextWrite};
 
-An adapter that intentionally encodes text as UTF-8 is a legitimate design when those are the desired bytes; it does not recover the original bytes of a file decoded with another encoding. That choice is distinct from contract bugs such as mishandling short-write counts. The tests compare observable behavior rather than treating a different abstraction as inherently incorrect.
+#[pyfunction]
+fn shout(mut source: PyTextRead, mut out: PyTextWrite) -> PyResult<()> {
+    let text = source.read_to_string()?;
+    out.write_all_str(&text.to_uppercase())?;
+    Ok(())
+}
 
-There is no universal speed ranking. Construction checks, Python attachment, Python calls per chunk, allocations, and copying all matter. Binary reads still copy into Rust, non-`bytes` buffers need a snapshot, writes construct Python payloads, and text extraction has Unicode conversion costs. Bound wrappers avoid repeated attachment when the caller already holds a Python token.
+#[pyfunction]
+fn peek(mut source: PyTextReadSeek) -> PyResult<String> {
+    let start = source.tell()?;           // an opaque position, like Python's
+    let head = source.read_chars(80)?;    // at most 80 characters, not bytes
+    source.seek_to(&start)?;
+    Ok(head)
+}
+```
 
-### Measured results
+Need a specific encoding? Decide it in Python, where it belongs:
 
-Median of three `python pytests/bench.py --repeats 9` runs, each figure itself the median of nine repeat means over ten calls: release build, otherwise idle Intel Core Ultra 7 258V, Linux 7.2, Python 3.14.7, measured 2026-09-23. Times are microseconds per complete operation, and every I/O row includes constructing one adapter. Factors are relative to the bound typed adapter, so above 1× is slower than it.
+```python
+peek(open("legacy.txt", encoding="latin-1"))
+peek(io.TextIOWrapper(raw_stream, encoding="utf-16"))
+```
 
-"fails": `pyo3-file` raises `OSError: buffer size must be at least 4 bytes` reading a whole text stream, and panics on non-ASCII text writes because it counts the characters Python reports as bytes. "n/a": `pyo3-filelike` has no text writer, and neither crate reads a count of characters. These are this machine's numbers for these workloads, not a general ranking; rerun the benchmark for yours.
+### Detached or bound: who holds the GIL
 
-| Workload | typed, bound | typed, detached | `pyo3-file` | `pyo3-filelike` |
-|---|---:|---:|---:|---:|
-| **Binary, `io.BytesIO`, 1 MiB** | | | | |
-| construction only (read) | 0.357 | 0.355 | 0.060 (0.17×) | 0.186 (0.52×) |
-| `read_to_end` | 39.4 | 38.9 | 81.2 (2.06×) | 84.4 (2.14×) |
-| `read`, 64 B buffer | 372.5 | 418.6 | 408.5 (1.10×) | 757.6 (2.03×) |
-| `read`, 4,096 B buffer | 31.2 | 31.9 | 31.3 (1.00×) | 37.7 (1.21×) |
-| `read`, 65,536 B buffer | 34.5 | 35.7 | 33.7 (0.98×) | 34.6 (1.00×) |
-| `write_all` 1,048,576 B × 1 | 54.6 | 54.9 | 53.3 (0.98×) | 54.3 (0.99×) |
-| `write_all` 64 B × 16,384 | 446.9 | 490.6 | 466.2 (1.04×) | 804.3 (1.80×) |
-| `write_all` 4,096 B × 256 | 35.0 | 35.5 | 33.9 (0.97×) | 40.5 (1.16×) |
-| `write_all` 65,536 B × 16 | 32.9 | 34.5 | 32.1 (0.97×) | 33.0 (1.00×) |
-| `write_all` 64 B × 16,384, then `flush` | 448.5 | 494.3 | 467.5 (1.04×) | 808.9 (1.80×) |
-| **Binary, buffered temporary file, 1 MiB** | | | | |
-| construction only (read) | 0.383 | 0.382 | 0.060 (0.16×) | 0.052 (0.14×) |
-| `read_to_end` | 96.0 | 96.5 | 127.9 (1.33×) | 128.3 (1.34×) |
-| `read`, 64 B buffer | 439.5 | 491.1 | 482.5 (1.10×) | 832.3 (1.89×) |
-| `read`, 4,096 B buffer | 67.5 | 68.7 | 67.4 (1.00×) | 74.0 (1.10×) |
-| `read`, 65,536 B buffer | 70.3 | 71.3 | 69.4 (0.99×) | 71.6 (1.02×) |
-| `write_all` 1,048,576 B × 1 | 125.3 | 126.2 | 124.7 (1.00×) | 123.4 (0.98×) |
-| `write_all` 64 B × 16,384 | 800.3 | 865.3 | 841.4 (1.05×) | 1,191.3 (1.49×) |
-| `write_all` 4,096 B × 256 | 115.5 | 116.1 | 114.5 (0.99×) | 120.9 (1.05×) |
-| `write_all` 65,536 B × 16 | 112.6 | 113.0 | 112.2 (1.00×) | 113.7 (1.01×) |
-| `write_all` 64 B × 16,384, then `flush` | 809.0 | 877.5 | 851.9 (1.05×) | 1,204.5 (1.49×) |
-| **Text, ASCII, 1 Mi characters, `io.StringIO`** | | | | |
-| read whole stream | 161.8 | 166.2 | fails | 362.7 (2.24×) |
-| `read_chars(64)` until EOF | 644.1 | 696.0 | n/a | n/a |
-| `read_chars(4,096)` until EOF | 174.9 | 176.6 | n/a | n/a |
-| `read_chars(65,536)` until EOF | 210.7 | 211.1 | n/a | n/a |
-| write 1,048,576 chars × 1 | 77.4 | 77.0 | 99.2 (1.28×) | n/a |
-| write 64 chars × 16,384 | 554.6 | 626.2 | 629.5 (1.14×) | n/a |
-| write 4,096 chars × 256 | 64.3 | 65.3 | 75.3 (1.17×) | n/a |
-| write 65,536 chars × 16 | 71.0 | 71.1 | 89.3 (1.26×) | n/a |
-| **Text, Unicode, 1 Mi characters, `io.StringIO`** | | | | |
-| read whole stream | 666.5 | 670.1 | fails | 1,660.3 (2.49×) |
-| `read_chars(64)` until EOF | 1,584.9 | 1,686.8 | n/a | n/a |
-| `read_chars(4,096)` until EOF | 711.8 | 716.9 | n/a | n/a |
-| `read_chars(65,536)` until EOF | 729.8 | 730.2 | n/a | n/a |
-| write 1,048,576 chars × 1 | 745.8 | 744.9 | fails | n/a |
-| write 64 chars × 16,384 | 2,057.7 | 2,123.6 | fails | n/a |
-| write 4,096 chars × 256 | 849.8 | 852.6 | fails | n/a |
-| write 65,536 chars × 16 | 806.9 | 812.0 | fails | n/a |
+Every wrapper comes in two forms:
 
-In summary: construction checks more and costs about 0.3 µs more. Bulk `read_to_end` is 1.3–2.1× faster than either crate, because it appends each returned `bytes` directly instead of zero-filling growing buffers. Whole-stream text reads are 2.2–2.5× faster than `pyo3-filelike`. With 4 KiB or larger chunks, binary I/O is within noise of both crates: Python allocating and copying the payload dominates. With 64-byte chunks it matches `pyo3-file` and is 1.5–2× faster than `pyo3-filelike`. ASCII text writes are 1.14–1.28× faster than `pyo3-file`.
+|  | Detached: `PyBinaryRead`, … | Bound: `.bind(py)` / `.into_bound(py)` |
+|---|---|---|
+| Holds | its own reference to the object | a `Python<'py>` token |
+| Attaches to Python | by itself, on every call | never, you already are |
+| Release the GIL, move to another thread | ✅ `Send + 'static` | ❌ tied to `'py` |
+| 64 B reads over 1 MiB (see [benchmarks](pytests/README.md#measured-results)) | 419 µs | 373 µs (1.12× faster) |
 
-Peak process memory growth for one binary `read_to_end` of 16 MiB (`python pytests/bench.py --memory --size 16777216`, one fresh process per case). Growth is the peak minus the high-water mark before the read, so it includes the 16 MiB result itself. The typed reads ask Python for at most 64 KiB at a time and append each result, rather than doubling a zero-filled buffer:
+**Detached** is what `#[pyfunction]` arguments give you, and it shines when Rust does the heavy
+lifting. Release the GIL, and each read re-attaches only for as long as it takes:
 
-| Source | typed, bound | typed, detached | `pyo3-file` | `pyo3-filelike` |
-|---|---:|---:|---:|---:|
-| `io.BytesIO` | +18.0 MiB | +16.6 MiB | +32.5 MiB | +32.4 MiB |
-| buffered temporary file | +18.2 MiB | +16.8 MiB | +32.4 MiB | +32.7 MiB |
+```rust,no_run
+use pyo3::prelude::*;
+use pyo3_typed_io::PyBinaryRead;
+use std::io::Read;
 
-## Validation and benchmarks
+#[pyfunction]
+fn digest(py: Python<'_>, mut source: PyBinaryRead) -> PyResult<usize> {
+    py.detach(move || {
+        let mut buf = [0u8; 64 * 1024];
+        let mut total = 0;
+        loop {
+            match source.read(&mut buf)? {
+                0 => return Ok(total),
+                n => total += n, // hash `buf[..n]` here, other Python threads keep running
+            }
+        }
+    })
+}
+```
 
-See [pytests/README.md](pytests/README.md) for how to run the test suite and benchmarks.
+**Bound** pays off when you hold the GIL anyway, e.g. to build Python objects as you read. There is
+no attaching per call, which adds up over many small reads:
+
+```rust,no_run
+use pyo3::prelude::*;
+use pyo3::types::{PyBytes, PyList};
+use pyo3_typed_io::PyBinaryRead;
+use std::io::{ErrorKind, Read};
+
+/// Splits a stream of `u32`-length-prefixed records into a list of `bytes`.
+#[pyfunction]
+fn records<'py>(py: Python<'py>, source: PyBinaryRead) -> PyResult<Bound<'py, PyList>> {
+    let mut source = source.into_bound(py);
+    let records = PyList::empty(py);
+    let mut header = [0u8; 4];
+    loop {
+        match source.read_exact(&mut header) {
+            Err(e) if e.kind() == ErrorKind::UnexpectedEof => return Ok(records),
+            result => result?,
+        }
+        let mut record = vec![0u8; u32::from_le_bytes(header) as usize];
+        source.read_exact(&mut record)?;
+        records.append(PyBytes::new(py, &record))?;
+    }
+}
+```
+
+### Typed Python stubs (experimental)
+
+With the `experimental-inspect` feature, every argument is described by a precise `Protocol` in
+PyO3's generated stubs, so type checkers catch a text file passed where bytes are expected:
+
+```python
+def checksum(source: SupportsBinaryRead) -> int: ...
+
+class SupportsBinaryRead(Protocol):
+    def read(self, size: int, /) -> ReadableBuffer | None: ...
+```
+
+Enabling the feature is not enough on its own yet: writing these protocols into a `.pyi` needs a
+custom build of PyO3's `pyo3-introspection` stub generator with `attach_to_root` support.
+
+## Development
+
+See [pytests/README.md](pytests/README.md) for running the test suite, rustdoc checks and
+benchmarks.

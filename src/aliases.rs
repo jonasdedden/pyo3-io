@@ -141,7 +141,7 @@ macro_rules! define_aliases {
                 and [`PyIO`](crate::PyIO) for shared operations. Only the capabilities listed \
                 above are available on this alias.\n\nThe attached counterpart is [`",
                 stringify!($bound), "`](crate::aliases::bound::", stringify!($bound),
-                "). See the [quickstart](crate#quickstart) for usage examples.")]
+                "). See the [usage guide](crate#usage) for examples.")]
             pub type $alias = crate::PyIO<
                 payload_type!($payload),
                 { has_capability!(read; $($capability),*) },
