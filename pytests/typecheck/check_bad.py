@@ -1,6 +1,5 @@
-"""Everything here must be rejected, each for its own reason.
-
-`run-tests.sh` asserts the exact count, so a rule that silently stops working is caught.
+"""Everything here must be rejected. check_diagnostics.py expects exactly one error on each
+`ext.` line, so a rule that silently stops working is caught.
 """
 
 import io

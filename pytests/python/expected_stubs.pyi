@@ -55,16 +55,13 @@ def bench_read(obj: Any, implementation: str, chunk: int, verify: bool) -> tuple
 
 def bench_text_read(obj: Any, implementation: str, chunk: int, verify: bool) -> tuple[int, str | None]:
     """
-    chunk=0 reads the whole stream; positive chunks are `read_chars` calls, typed only, since
-    legacy/filelike size their reads in bytes. Legacy/filelike UTF-8 conversion is part of their
-    adaptation cost. Returns the UTF-8 length; verify=true also returns the text, for untimed
-    correctness checks only, so timed calls do not convert the result back to Python.
+    chunk=0 reads the whole stream; positive chunks are typed-only `read_chars` calls.
+    Returns the UTF-8 length, and with verify=true also the text.
     """
 
 def bench_text_write(obj: Any, implementation: str, data: str, count: int, flush: bool) -> int:
     """
-    Constructs once and writes the same string `count` times. Legacy takes UTF-8 bytes and
-    decodes them back to `str`; typed hands over the `str`; filelike has no text writer.
+    Constructs once and writes `data` `count` times; filelike has no text writer.
     """
 
 def bench_write(obj: Any, implementation: str, data: bytes, count: int, flush: bool) -> int:
@@ -77,7 +74,7 @@ def binary_fileno(file: SupportsBinaryFileno) -> int: ...
 
 def binary_fileno_via_as_raw_fd(file: SupportsBinaryFileno) -> int:
     """
-    Raw descriptor compatibility; this does not promise a borrowed descriptor lifetime.
+    Through `AsRawFd`, which panics where `fileno` returns an error.
     """
 
 def binary_read_all(file: SupportsBinaryRead) -> bytes:
@@ -111,9 +108,7 @@ def filelike_fileno(obj: Any) -> int:
 
 def filelike_read_all(obj: Any) -> bytes:
     """
-    `pyo3-filelike` splits binary and text into two types, so this is the closest equivalent of
-    [`binary_read_all`]. `PyBinaryFile::new` is private, so `From` is the only way in and its
-    `unwrap` turns a rejected file into a panic.
+    The `pyo3-filelike` equivalent of [`binary_read_all`]. Its `From` panics on a rejected file.
     """
 
 def filelike_read_once(obj: Any) -> bytes:
@@ -154,17 +149,9 @@ def legacy_read_all_text(obj: Any) -> str:
     characters are encoded to UTF-8 by pyo3-file and decoded again here.
     """
 
-def legacy_read_chars(obj: Any, n: int) -> str:
-    """
-    Reads `n` characters the `pyo3-file` way, for a like-for-like comparison with
-    [`text_read_chars`]: a buffer four times the character count, one `read`, then a UTF-8
-    decode of what `pyo3-file` encoded on the way in.
-    """
-
 def legacy_read_once(obj: Any) -> bytes:
     """
-    A single fixed-size `pyo3-file` read, so the result does not depend on `read_to_end`'s
-    buffer bookkeeping. Shows plainly what the Rust side receives.
+    A single fixed-size `pyo3-file` read.
     """
 
 def legacy_write(obj: Any, data: bytes) -> int:
@@ -175,10 +162,7 @@ def legacy_write(obj: Any, data: bytes) -> int:
 
 def read_on_another_thread(file: SupportsBinaryRead) -> int:
     """
-    Moves the file onto a thread of its own, with this thread releasing the GIL entirely.
-
-    The child holds no token; each read attaches for as long as it needs and no longer. A
-    GIL-bound form could not leave this thread at all.
+    Reads on a thread of its own while this one releases the GIL; each read attaches for itself.
     """
 
 def text_fileno(file: SupportsTextFileno) -> int: ...

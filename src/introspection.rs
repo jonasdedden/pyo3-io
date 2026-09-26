@@ -1,17 +1,9 @@
-//! Type stub protocols for [`PyIO`](crate::PyIO).
+//! A `typing.Protocol` per payload kind and capability set, naming the methods the Rust side
+//! calls, for `FromPyObject::INPUT_TYPE` to point at.
 //!
-//! Every payload kind and capability set gets a `typing.Protocol` naming exactly the methods the
-//! Rust side will call on the object, and `FromPyObject::INPUT_TYPE` points at the matching one.
-//!
-//! These are structural contracts, not proofs of runtime behavior. An annotation cannot guarantee
-//! that a method returns a valid count, that a buffer has a supported layout, or that I/O succeeds.
-//! Nonblocking reads and writes may return `None`; the adapter reports that as `WouldBlock`.
-//!
-//! The shared file-type table expands to `#[used]` statics with unique export names, holding
-//! length-prefixed metadata in the same format as `#[pyclass]`. They are declared
-//! with `"attach_to_root": true` because a library crate cannot know the introspection id of the
-//! root module of whichever extension links it; the stub generator adopts them into that module
-//! and drops the ones no annotation refers to. All encoding happens during const evaluation.
+//! Each is emitted as `#[used]` statics in `#[pyclass]`'s introspection format. A library cannot
+//! know the id of the extension module that links it, so they are marked `attach_to_root` and the
+//! stub generator adopts the ones an annotation refers to.
 
 use crate::io_types::{has_capability, io_types, payload_type};
 use crate::Payload;
@@ -40,8 +32,7 @@ macro_rules! protocol_id {
     };
 }
 
-// Keyed by the protocol stem, which is unique per row; only the exported symbol needs to be
-// unique, and the Rust alias name is deliberately not part of anything Python sees.
+// The protocol stem and suffix make the exported symbol unique.
 macro_rules! emit_fragment {
     ($protocol:ident, $suffix:ident, $chunk:expr) => {
         const _: () = {
@@ -72,8 +63,7 @@ macro_rules! emit_text_tell {
     };
 }
 
-// Each capability names the methods the adapter calls. Text seeking additionally needs tell;
-// flush is optional at runtime and therefore deliberately absent from writing protocols.
+// Text seeking also needs tell. flush is optional at runtime, so no protocol requires it.
 macro_rules! emit_capability {
     ($protocol:ident, $payload:ident, read) => {
         emit_method!($protocol, read, ["size": INT],
@@ -131,7 +121,7 @@ macro_rules! define_protocols {
 
 io_types!(define_protocols);
 
-/// With no required methods there is no useful structural protocol, so use `typing.Any`.
+/// The protocol for a payload kind and capability set, or `typing.Any` if nothing is required.
 pub(crate) const fn protocol_hint(
     text: bool,
     read: bool,

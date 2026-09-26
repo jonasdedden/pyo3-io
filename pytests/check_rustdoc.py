@@ -79,11 +79,9 @@ class Page(HTMLParser):
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         # `dict` keeps the last value for duplicate attributes, matching browser behavior.
         attributes = dict(attrs)
-        if "id" in attributes:
-            # Rustdoc also percent-encodes some literal impl IDs in the HTML.
-            # A valueless `id` attribute parses as None; there is nothing to record then.
-            element_id = attributes["id"]
-            assert element_id is not None
+        element_id = attributes.get("id")
+        if element_id:
+            # Rustdoc percent-encodes some impl IDs in the HTML.
             self.ids.add(unquote(element_id))
         if tag == "main":
             self.main = True
@@ -188,6 +186,20 @@ class Docs:
             require(f"method.{method}" in page.ids, f"{relative} is missing method.{method}")
         return page
 
+    def operations(self, path: Path) -> set[tuple[str, str]]:
+        """(page name, method) for each method link under an alias's Available operations."""
+        page = self.page(path)
+        require(
+            "Available operations" in page.headings, f"{path.name}: missing Available operations"
+        )
+        operations: set[tuple[str, str]] = set()
+        for href, section in page.links:
+            if section == "Available operations":
+                target = self.resolve(path, href)
+                if target and target[1].startswith("method."):
+                    operations.add((target[0].path.name, target[1].removeprefix("method.")))
+        return operations
+
 
 def catalog_names(bound: bool = False) -> set[str]:
     # Deliberately independent of the Rust macro table and any private generator.
@@ -202,22 +214,16 @@ def catalog_names(bound: bool = False) -> set[str]:
     }
 
 
+def alias_page(root: Path, name: str) -> Path:
+    # The canonical catalog page; the six common aliases are also inlined at the root.
+    bound = name.startswith("Bound")
+    return root / "aliases" / ("bound" if bound else "") / f"type.{name}.html"
+
+
 def check_summary(docs: Docs, name: str, capabilities: tuple[str, ...]) -> None:
     bound = name.startswith("Bound")
     kind = "Text" if "Text" in name else "Binary"
-    subdir = docs.root / "aliases" / ("bound" if bound else "")
-    # Canonical catalog pages; the six common aliases are also inlined at the root.
-    path = subdir / f"type.{name}.html"
-    page = docs.page(path)
-    require(
-        "Available operations" in page.headings, f"{name}: missing Available operations heading"
-    )
-    operations: list[tuple[str, str]] = []
-    for href, section in page.links:
-        if section == "Available operations":
-            target = docs.resolve(path, href)
-            if target and target[1].startswith("method."):
-                operations.append((target[0].path.name, target[1][7:]))
+    operations = docs.operations(alias_page(docs.root, name))
     common = BOUND_COMMON if bound else OWNED_COMMON
     family = f"type.{'BoundPy' if bound else 'Py'}{kind}IO.html"
     shared = f"struct.{'BoundPyIO' if bound else 'PyIO'}.html"
@@ -276,23 +282,12 @@ def check_docs(root: Path, unix: bool) -> None:
     # Descriptor operations belong to the shared type, not a payload family.
     for bound in (False, True):
         name = ("BoundPy" if bound else "Py") + "BinaryFileno"
-        subdir = root / "aliases" / ("bound" if bound else "")
-        path = subdir / f"type.{name}.html"
-        page = docs.page(path)
         shared = f"struct.{'BoundPyIO' if bound else 'PyIO'}.html"
-        links = {
-            (target[0].path.name, target[1])
-            for href, section in page.links
-            if section == "Available operations"
-            for target in [docs.resolve(path, href)]
-            if target is not None
-        }
-        require((shared, "method.fileno") in links, f"{name}: missing shared fileno link")
-        clone_links = {
-            (target, fragment) for target, fragment in links if fragment == "method.try_clone_fd"
-        }
+        operations = docs.operations(alias_page(root, name))
+        require((shared, "fileno") in operations, f"{name}: missing shared fileno link")
+        clone_links = {(page, method) for page, method in operations if method == "try_clone_fd"}
         require(
-            clone_links == ({(shared, "method.try_clone_fd")} if unix else set()),
+            clone_links == ({(shared, "try_clone_fd")} if unix else set()),
             f"{name}: incorrect Unix-only try_clone_fd links: {clone_links}",
         )
     docs.validate_links()
@@ -304,9 +299,8 @@ def main() -> None:
         (line.removeprefix("host: ") for line in version.splitlines() if line.startswith("host: ")),
         None,
     )
-    require(host, "rustc -vV did not report a host target")
-    # `require` raises, but the checkers cannot see that; spell out the narrowing.
-    assert host is not None
+    if host is None:
+        raise AssertionError("rustc -vV did not report a host target")
     cfg = subprocess.check_output(
         ["rustc", "--print", "cfg", "--target", host], cwd=ROOT, text=True
     )

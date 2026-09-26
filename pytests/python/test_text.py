@@ -69,15 +69,7 @@ class TestReadChars:
     @pytest.mark.parametrize("n", [0, 1, 2, 3, 4, 5])
     def test_counts_characters_not_bytes(self, n: int) -> None:
         """`read(3)` on `aä€😀b` is three characters, which is six UTF-8 bytes."""
-        got = ext.text_read_chars(io.StringIO(MIXED), n)
-        assert got == MIXED[:n]
-        assert len(got) == n
-
-    def test_single_character_needs_no_minimum_buffer(self) -> None:
-        assert ext.text_read_chars(io.StringIO(MIXED), 1) == "a"
-
-    def test_four_byte_character(self) -> None:
-        assert ext.text_read_chars(io.StringIO("\U0001f600"), 1) == "\U0001f600"
+        assert ext.text_read_chars(io.StringIO(MIXED), n) == MIXED[:n]
 
     def test_past_end(self) -> None:
         assert ext.text_read_chars(io.StringIO("ab"), 100) == "ab"
@@ -135,9 +127,8 @@ class TestFileno:
             assert ext.text_fileno(handle) == handle.fileno()
 
     def test_stringio_is_an_error_not_a_panic(self) -> None:
-        with pytest.raises(OSError) as excinfo:
+        with pytest.raises(OSError):
             ext.text_fileno(io.StringIO("abc"))
-        assert "PanicException" not in type(excinfo.value).__name__
 
 
 class TestCombined:

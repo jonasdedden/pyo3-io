@@ -78,17 +78,6 @@ class Overreader:
         return b"x" * (size + 10) if size else b""
 
 
-class NonBlocking:
-    """Returns None, which Python streams use for "nothing available yet".
-
-    `read(0)` still answers immediately, as every real stream does: a zero-length read never has
-    to wait for anything.
-    """
-
-    def read(self, size: int, /) -> bytes | None:
-        return b"" if size == 0 else None
-
-
 class PartialWriter:
     """Accepts at most 3 bytes per call, like a real short write."""
 

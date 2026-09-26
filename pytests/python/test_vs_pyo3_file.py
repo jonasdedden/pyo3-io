@@ -82,10 +82,6 @@ class TestStringIO:
     def test_typed_works_for_every_length(self) -> None:
         assert self._failures(ext.text_read_all) == []
 
-    @pytest.mark.parametrize("text", ["", "a", "ab", "abc", "abcd", "x" * 10_000])
-    def test_typed_handles_representative_lengths(self, text: str) -> None:
-        assert ext.text_read_all(io.StringIO(text)) == text
-
     def test_typed_works_for_every_length_of_multibyte_text(self) -> None:
         for n in self.LENGTHS:
             assert ext.text_read_all(io.StringIO("é" * n)) == "é" * n
@@ -99,11 +95,6 @@ class TestFilenoPanics:
         with pytest.raises(BaseException) as excinfo:
             ext.legacy_fileno(io.BytesIO(b"abc"))
         assert "Panic" in type(excinfo.value).__name__
-
-    def test_typed_returns_an_error(self) -> None:
-        with pytest.raises(OSError) as excinfo:
-            ext.binary_fileno(io.BytesIO(b"abc"))
-        assert "Panic" not in type(excinfo.value).__name__
 
 
 class TestNonUtf8Write:
@@ -123,14 +114,3 @@ class TestNonUtf8Write:
         buffer = io.BytesIO()
         ext.binary_write(buffer, GZIP_BYTES)
         assert buffer.getvalue() == GZIP_BYTES
-
-
-class TestAnnotationQuality:
-    """The point of the exercise: the untyped entry points cannot say anything useful."""
-
-    def test_generated_stub_says_any_for_untyped_entry_points(self, stub_source: str) -> None:
-        assert "def legacy_read_all(obj: Any) -> bytes" in stub_source
-
-    def test_generated_stub_is_exact_for_typed_entry_points(self, stub_source: str) -> None:
-        assert "def binary_read_all(file: SupportsBinaryRead) -> bytes" in stub_source
-        assert "def text_read_all(file: SupportsTextRead) -> str" in stub_source

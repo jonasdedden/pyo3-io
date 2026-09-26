@@ -1,8 +1,5 @@
-//! Const encoding of the two PyO3 introspection chunk shapes we emit.
-//!
-//! This intentionally depends on PyO3's implementation-level fragment and escaping APIs,
-//! and its doc-hidden expression serializers. Keep these dependencies here: expressions
-//! are owned by PyO3, while only the enclosing class/function schema is encoded below.
+//! Const encoding of the class and method introspection chunks, on top of PyO3's doc-hidden
+//! serializers. Keep those unstable dependencies confined to this module.
 
 use pyo3::impl_::introspection::{
     escape_json_string, escaped_json_string_len, SerializedIntrospectionFragment,

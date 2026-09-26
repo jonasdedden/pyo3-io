@@ -8,7 +8,7 @@ python3 pytests/check_rustdoc.py
 ./pytests/run-tests.sh
 ```
 
-The Python tools (pytest, ruff, mypy, basedpyright) are pinned in `pyproject.toml` and `uv.lock`; their settings live there too, so `uv run mypy` in `pytests/` is the same check CI runs. The runner defaults to standard Rust and Python validation, without a custom stub generator, and checks freshly rendered rustdoc pages and their links. Opt in to stub generation/type checking or benchmarks:
+The Python tools and their settings are pinned in `pyproject.toml` and `uv.lock`, so `uv run mypy` in `pytests/` is the same check CI runs. Stub generation and benchmarks are opt-in:
 
 ```sh
 PYO3_INTROSPECTION=/path/to/pyo3-introspection ./pytests/run-tests.sh --stubs
@@ -19,13 +19,13 @@ python pytests/bench.py --profile release
 python pytests/bench.py --memory --size 8388608
 ```
 
-`--stubs` requires the custom generator explicitly; there is no neighboring-checkout default. Stub checking also needs `pyright`. The Python benchmark defaults to a release build (built incrementally outside timing) and reports median and spread for constructor-only, chunk, bulk, real-file, and ASCII/Unicode text read and write workloads; `--filter TEXT` runs only the workloads whose label contains `TEXT`. Use its results for the measured workload, not as a fixed speed claim. `--memory` runs each binary bulk-read case in a fresh subprocess and reports peak process RSS on Linux/macOS. It includes Python, extension loading and input setup; it is not an allocated-byte count or a claim about the adapter alone.
+`--stubs` needs a PyO3 stub generator with `attach_to_root` support, and `pyright`. `bench.py` reports the median and spread of each workload; `--filter TEXT` runs only those whose label contains `TEXT`. `--memory` reports the peak process RSS of each binary bulk read, one fresh subprocess per case (Linux and macOS only).
 
 ## Measured results
 
 Median of three `python pytests/bench.py --repeats 9` runs, each figure itself the median of nine repeat means over ten calls: release build, otherwise idle Intel Core Ultra 7 258V, Linux 7.2, Python 3.14.7, measured 2026-09-23. Times are microseconds per complete operation, and every I/O row includes constructing one adapter. Factors are relative to the bound typed adapter, so above 1× is slower than it.
 
-"fails": `pyo3-file` raises `OSError: buffer size must be at least 4 bytes` reading a whole text stream, and panics on non-ASCII text writes because it counts the characters Python reports as bytes. "n/a": `pyo3-filelike` has no text writer, and neither crate reads a count of characters. These are this machine's numbers for these workloads, not a general ranking; rerun the benchmark for yours.
+"fails": `pyo3-file` raises `OSError: buffer size must be at least 4 bytes` reading a whole text stream, and panics on non-ASCII text writes because it counts the characters Python reports as bytes. "n/a": `pyo3-filelike` has no text writer, and neither crate reads a count of characters.
 
 | Workload | typed, bound | typed, detached | `pyo3-file` | `pyo3-filelike` |
 |---|---:|---:|---:|---:|
@@ -70,9 +70,9 @@ Median of three `python pytests/bench.py --repeats 9` runs, each figure itself t
 | write 4,096 chars × 256 | 849.8 | 852.6 | fails | n/a |
 | write 65,536 chars × 16 | 806.9 | 812.0 | fails | n/a |
 
-In summary: construction checks more and costs about 0.3 µs more. Bulk `read_to_end` is 1.3–2.1× faster than either crate, because it appends each returned `bytes` directly instead of zero-filling growing buffers. Whole-stream text reads are 2.2–2.5× faster than `pyo3-filelike`. With 4 KiB or larger chunks, binary I/O is within noise of both crates: Python allocating and copying the payload dominates. With 64-byte chunks it matches `pyo3-file` and is 1.5–2× faster than `pyo3-filelike`. ASCII text writes are 1.14–1.28× faster than `pyo3-file`.
+Bulk `read_to_end` is faster because it appends each returned `bytes` rather than zero-filling growing buffers. With 4 KiB or larger chunks, Python allocating and copying the payload dominates, so all adapters are within noise.
 
-Peak process memory growth for one binary `read_to_end` of 16 MiB (`python pytests/bench.py --memory --size 16777216`, one fresh process per case). Growth is the peak minus the high-water mark before the read, so it includes the 16 MiB result itself. The typed reads ask Python for at most 64 KiB at a time and append each result, rather than doubling a zero-filled buffer:
+Peak process memory growth for one binary `read_to_end` of 16 MiB (`python pytests/bench.py --memory --size 16777216`, one fresh process per case). Growth is the peak minus the high-water mark before the read, so it includes the 16 MiB result itself:
 
 | Source | typed, bound | typed, detached | `pyo3-file` | `pyo3-filelike` |
 |---|---:|---:|---:|---:|

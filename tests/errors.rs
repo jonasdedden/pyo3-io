@@ -1,7 +1,4 @@
-//! [`Error`] reaches both destinations with the right shape.
-//!
-//! Every failure has to be usable twice over: as an [`io::Error`] with a kind a Rust caller can
-//! match on, and as the Python exception a caller on that side would expect.
+//! [`Error`] converts to `io::Error` with a kind a Rust caller can match on.
 
 use pyo3_io::Error;
 use std::io;
@@ -12,8 +9,6 @@ fn kind(err: Error) -> io::ErrorKind {
 
 #[test]
 fn none_from_the_object_is_would_block() {
-    // Not fatal: a non-blocking stream returns None until data arrives, so a caller has to be
-    // able to tell this apart from a real failure and try again.
     assert_eq!(
         kind(Error::WouldBlock {
             operation: "read",

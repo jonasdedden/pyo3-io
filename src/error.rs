@@ -1,4 +1,4 @@
-//! What can go wrong, and how it reaches Rust and Python.
+//! The crate's error type and its conversions to `io::Error` and `PyErr`.
 
 use crate::Payload;
 use pyo3::exceptions::{PyBlockingIOError, PyTypeError};
@@ -7,17 +7,13 @@ use std::io;
 
 /// Everything this crate can fail with.
 ///
-/// Both destinations are covered: `?` in a function returning [`std::io::Result`] converts through
-/// [`From<Error> for io::Error`](#impl-From<Error>-for-Error), preserving a meaningful
-/// [`io::ErrorKind`], and `?` in a `#[pyfunction]` converts to the Python exception that matches.
+/// Converts to an [`io::Error`] with a matching [`io::ErrorKind`], and to a matching Python
+/// exception.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum Error {
-    /// The object returned `None`, which Python streams use for "nothing right now".
-    ///
-    /// This is not fatal. A non-blocking stream returns `None` when no data has arrived yet and
-    /// real data on a later call, so this maps to [`io::ErrorKind::WouldBlock`] and reaches Python
-    /// as `BlockingIOError` — the same thing a buffered stream would have raised by itself.
+    /// The object returned `None`, which non-blocking Python streams use for "not ready yet".
+    /// Maps to [`io::ErrorKind::WouldBlock`] and `BlockingIOError`.
     #[error(
         "the object returned None from {operation}(), meaning nothing could be {done} right now. \
          This is what a non-blocking stream does when it is not ready; a later call may succeed. \
@@ -30,10 +26,7 @@ pub enum Error {
         done: &'static str,
     },
 
-    /// The actual read result cannot be converted to the requested payload.
-    ///
-    /// This can occur even after successful classification, for example if a Python text
-    /// stream returns surrogate code points that are not representable in Rust UTF-8.
+    /// A read result was not the payload kind asked for, or was a `str` with lone surrogates.
     #[error(
         "read() did not return {expected} usable by a {kind} stream ({source}). \
          If it returns {other_payload}, use a {other} wrapper instead. Binary results must \
@@ -95,10 +88,7 @@ pub enum Error {
         what: &'static str,
     },
 
-    /// The object has the method but says it will refuse to do it.
-    ///
-    /// The corresponding `io.IOBase` query returned `False`. This checks the object's declared
-    /// contract; a subclass can still implement an operation contrary to that declaration.
+    /// An `io.IOBase` object's `readable()`, `writable()` or `seekable()` returned `False`.
     #[error(
         "object of type {type_name} reports {query}() is False for .{method}(). \
          It was extracted as a file with the {capability} capability."
@@ -134,7 +124,7 @@ pub enum Error {
         got: &'static str,
         /// The Python type.
         type_name: String,
-        /// Which rung of the classification fired.
+        /// Which `io` base class it derives from.
         why: &'static str,
         /// What to do about it.
         hint: &'static str,
@@ -172,27 +162,22 @@ impl Error {
     }
 }
 
-/// Keeps a meaningful [`io::ErrorKind`] rather than flattening everything to `Other`.
 impl From<Error> for io::Error {
     fn from(err: Error) -> Self {
-        let kind = match &err {
+        let kind = match err {
+            // pyo3 maps OSError subclasses, including BlockingIOError, to their kinds.
+            Error::Python(err) => return err.into(),
             Error::WouldBlock { .. } => io::ErrorKind::WouldBlock,
             Error::WrongPayload { .. }
             | Error::OverlongRead { .. }
             | Error::OverlongTextRead { .. }
             | Error::ImpossibleWriteCount { .. } => io::ErrorKind::InvalidData,
             Error::WroteNothing { .. } => io::ErrorKind::WriteZero,
-            Error::OutOfRange { .. } => io::ErrorKind::InvalidInput,
-            Error::MissingMethod { .. }
+            Error::OutOfRange { .. }
+            | Error::MissingMethod { .. }
             | Error::RefusesCapability { .. }
             | Error::WrongKind { .. } => io::ErrorKind::InvalidInput,
-            // `pyo3` already maps the OS-shaped exceptions, including BlockingIOError, so a
-            // stream that raises rather than returning None lands on the same kind.
-            Error::Python(_) => io::ErrorKind::Other,
         };
-        if let Error::Python(err) = err {
-            return err.into();
-        }
         io::Error::new(kind, err)
     }
 }
@@ -201,7 +186,7 @@ impl From<Error> for PyErr {
     fn from(err: Error) -> Self {
         match err {
             Error::Python(err) => err,
-            // These are the extraction-time checks, and a wrong argument is a TypeError.
+            // Extraction-time checks: a wrong argument is a TypeError.
             err @ (Error::MissingMethod { .. }
             | Error::RefusesCapability { .. }
             | Error::WrongKind { .. }) => PyTypeError::new_err(err.to_string()),

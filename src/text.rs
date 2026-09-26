@@ -1,9 +1,4 @@
-//! The `str`-shaped API of [`PyTextIO`] and [`BoundPyTextIO`].
-//!
-//! Python counts a text stream's `read(size)` in characters, so there is no byte count for
-//! [`std::io::Read`] to honour and this deliberately does not implement it. Characters cross the
-//! boundary as Python Unicode and Rust UTF-8 strings; no assumption is made about the stream's
-//! underlying encoding.
+//! The character API of [`PyTextIO`] and [`BoundPyTextIO`].
 
 use crate::{BoundPyTextIO, Error, PyTextIO, TextPayload};
 use pyo3::intern;
@@ -11,16 +6,11 @@ use pyo3::prelude::*;
 use pyo3::types::{PyInt, PyString};
 use std::io;
 
-/// An opaque, arbitrary-precision position returned by a Python text stream.
-///
-/// Cookies are meaningful only to the stream that produced them. They are not byte offsets.
+/// An opaque position returned by a Python text stream's `tell()`, meaningful only to that stream.
 #[derive(Debug)]
 pub struct PyTextPosition(Py<PyInt>);
 
-/// The number of code points in `text`, which Python stores alongside it.
-///
-/// Read directly rather than through `len()`, which a `str` subclass could override. For any
-/// string that converts to Rust UTF-8, this equals `chars().count()` of the converted string.
+/// The number of code points Python stores for `text`, bypassing a `str` subclass's `len()`.
 fn char_len(text: &Bound<'_, PyString>) -> usize {
     // SAFETY: `text` is a live, attached `str` (or subclass) instance, for which
     // PyUnicode_GetLength cannot fail; it only reads the stored length.
@@ -29,7 +19,7 @@ fn char_len(text: &Bound<'_, PyString>) -> usize {
 }
 
 impl PyTextPosition {
-    /// Clones the owned Python reference while attached to Python.
+    /// Clones the position while attached to Python.
     pub fn clone_ref(&self, py: Python<'_>) -> Self {
         Self(self.0.clone_ref(py))
     }
@@ -55,9 +45,8 @@ impl<const WRITE: bool, const SEEK: bool, const FILENO: bool>
 
     /// Reads the rest of the stream.
     ///
-    /// Uses bounded positive-size reads until EOF, retrying interrupted reads.
-    /// On error, already-consumed text is not returned. For nonblocking streams, use
-    /// [`read_chars`](Self::read_chars) and retain each successful chunk before retrying.
+    /// On error, text already consumed is lost; for nonblocking streams, use
+    /// [`read_chars`](Self::read_chars) instead.
     pub fn read_to_string(&mut self) -> io::Result<String> {
         let mut out = String::new();
         loop {
@@ -71,32 +60,28 @@ impl<const WRITE: bool, const SEEK: bool, const FILENO: bool>
     }
 
     /// Appends at most `count` characters to `out`, returning how many; `out` is untouched on
-    /// error. The text is copied once, straight out of the Python string.
+    /// error.
     fn read_chars_into(&self, count: usize, out: &mut String) -> io::Result<usize> {
-        let asked = count;
-        let count = i64::try_from(count).map_err(|_| Error::OutOfRange {
+        let size = i64::try_from(count).map_err(|_| Error::OutOfRange {
             what: "character count",
         })?;
         let obj = self.as_py_object();
         let py = obj.py();
-        (|| -> Result<usize, Error> {
-            let res = obj.call_method1(intern!(py, "read"), (count,))?;
-            if res.is_none() {
-                return Err(Error::would_block_read());
-            }
-            let text = res
-                .cast::<PyString>()
-                .map_err(|err| Error::wrong_payload::<TextPayload>(err.into()))?;
-            // Borrowed, not copied: the string's own UTF-8 form, which CPython caches on it.
-            let utf8 = text.to_cow().map_err(Error::wrong_payload::<TextPayload>)?;
-            let got = char_len(text);
-            if got > asked {
-                return Err(Error::OverlongTextRead { got, asked });
-            }
-            out.push_str(&utf8);
-            Ok(got)
-        })()
-        .map_err(Into::into)
+        let res = obj.call_method1(intern!(py, "read"), (size,))?;
+        if res.is_none() {
+            return Err(Error::would_block_read().into());
+        }
+        let text = res
+            .cast::<PyString>()
+            .map_err(|err| Error::wrong_payload::<TextPayload>(err.into()))?;
+        // Borrows the UTF-8 form CPython caches on the string.
+        let utf8 = text.to_cow().map_err(Error::wrong_payload::<TextPayload>)?;
+        let got = char_len(text);
+        if got > count {
+            return Err(Error::OverlongTextRead { got, asked: count }.into());
+        }
+        out.push_str(&utf8);
+        Ok(got)
     }
 }
 
@@ -141,57 +126,35 @@ impl<const READ: bool, const SEEK: bool, const FILENO: bool>
         let obj = self.as_py_object();
         let py = obj.py();
         let text = PyString::new(py, text);
-        // Python knew the length the moment it built the string; counting the characters
-        // again in Rust would be a second pass over the text.
+        // Python already knows the length; counting in Rust would be a second pass.
         let available = char_len(&text);
-        crate::write::write_result(
+        let written = crate::write::write_result(
             py,
             obj.call_method1(intern!(py, "write"), (text,)),
             available,
             "characters",
-        )
-        .map(|written| (written, available))
-        .map_err(Into::into)
+        )?;
+        Ok((written, available))
     }
 
     /// Flushes the object, or does nothing if it has no `flush`.
-    ///
-    /// An object with no `flush` has nothing to flush, so requiring one would turn away every
-    /// minimal writer that implements nothing else.
     pub fn flush(&mut self) -> io::Result<()> {
-        let obj = self.as_py_object();
-        let py = obj.py();
-        (|| -> Result<(), Error> {
-            let flush = intern!(py, "flush");
-            if obj.hasattr(flush)? {
-                obj.call_method0(flush)?;
-            }
-            Ok(())
-        })()
-        .map_err(Into::into)
+        crate::write::flush(self.as_py_object())
     }
 }
 
-/// Seeking a text stream.
-///
-/// There is no [`std::io::Seek`] implementation on purpose. A Python text stream's positions are
-/// opaque cookies produced by `tell()`, not byte offsets: the only other things it accepts are the
-/// start and the end of the stream. [`SeekFrom::Current`](std::io::SeekFrom::Current) and an
-/// arbitrary [`SeekFrom::Start`](std::io::SeekFrom::Start) have no meaning, and Python raises if
-/// you try.
-impl<const READ: bool, const WRITE: bool, const FILENO: bool>
-    BoundPyTextIO<'_, READ, WRITE, true, FILENO>
+/// Text streams seek only to cookies from `tell()`, the start or the end, so there is no
+/// [`std::io::Seek`].
+impl<'py, const READ: bool, const WRITE: bool, const FILENO: bool>
+    BoundPyTextIO<'py, READ, WRITE, true, FILENO>
 {
     /// The current position, as an opaque cookie for [`seek_to`](Self::seek_to).
-    ///
-    /// The value is not a byte offset and arithmetic on it is meaningless.
     pub fn tell(&mut self) -> io::Result<PyTextPosition> {
         let obj = self.as_py_object();
         let py = obj.py();
-        (|| -> PyResult<PyTextPosition> {
-            PyTextPosition::from_python(obj.call_method0(intern!(py, "tell"))?)
-        })()
-        .map_err(Into::into)
+        Ok(PyTextPosition::from_python(
+            obj.call_method0(intern!(py, "tell"))?,
+        )?)
     }
 
     /// Returns to a position previously reported by [`tell`](Self::tell).
@@ -201,30 +164,25 @@ impl<const READ: bool, const WRITE: bool, const FILENO: bool>
 
     /// Returns to the start of the stream.
     pub fn rewind(&mut self) -> io::Result<PyTextPosition> {
-        let zero = 0.into_pyobject(self.as_py_object().py()).unwrap();
-        self.py_seek(&zero, 0)
+        self.py_seek(0, 0)
     }
 
     /// Moves to the end of the stream.
     pub fn seek_to_end(&mut self) -> io::Result<PyTextPosition> {
-        let zero = 0.into_pyobject(self.as_py_object().py()).unwrap();
-        self.py_seek(&zero, 2)
+        self.py_seek(0, 2)
     }
 
-    fn py_seek(&self, offset: &Bound<'_, PyInt>, whence: i64) -> io::Result<PyTextPosition> {
+    fn py_seek(&self, offset: impl IntoPyObject<'py>, whence: i64) -> io::Result<PyTextPosition> {
         let obj = self.as_py_object();
         let py = obj.py();
-        (|| -> PyResult<PyTextPosition> {
-            let res = obj.call_method1(intern!(py, "seek"), (offset, whence))?;
-            PyTextPosition::from_python(res)
-        })()
-        .map_err(Into::into)
+        let res = obj.call_method1(intern!(py, "seek"), (offset, whence))?;
+        Ok(PyTextPosition::from_python(res)?)
     }
 }
 
 // ---------------------------------------------------------------- detached forms
 //
-// One attach for the whole operation, then the bound implementation above.
+// Attach once and delegate to the bound implementation above.
 
 impl<const WRITE: bool, const SEEK: bool, const FILENO: bool> PyTextIO<true, WRITE, SEEK, FILENO> {
     /// See [`BoundPyTextIO::read_chars`](crate::BoundPyTextIO#method.read_chars).
@@ -246,7 +204,6 @@ impl<const READ: bool, const SEEK: bool, const FILENO: bool> PyTextIO<READ, true
 
     /// See [`BoundPyTextIO::write_all_str`](crate::BoundPyTextIO#method.write_all_str).
     pub fn write_all_str(&mut self, text: &str) -> io::Result<()> {
-        // One attach for the whole retry loop rather than one per short write.
         Python::attach(|py| self.bind(py).write_all_str(text))
     }
 

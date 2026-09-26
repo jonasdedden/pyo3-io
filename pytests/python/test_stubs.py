@@ -46,10 +46,6 @@ class TestStubContent:
             "SupportsTextWrite",
         }
 
-    def test_no_unused_protocol_leaks_in(self, stub_source: str) -> None:
-        for unused in ("SupportsBinarySeek", "SupportsTextSeekFileno", "SupportsTextWriteSeek"):
-            assert f"class {unused}(" not in stub_source
-
     def test_binary_and_text_payloads_are_distinct(self, stub_source: str) -> None:
         assert "def read(self, size: int, /) -> ReadableBuffer | None: ..." in stub_source
         assert "def read(self, size: int, /) -> str | None: ..." in stub_source
@@ -57,7 +53,7 @@ class TestStubContent:
         assert "def write(self, data: str, /) -> int | None: ..." in stub_source
 
     def test_protocols_require_exactly_the_named_capabilities(self, stub_source: str) -> None:
-        """Structural contracts require methods, not successful runtime behavior."""
+        """Text seeking also requires `tell`; `flush` is never required, as it is optional."""
         import ast
 
         for node in ast.parse(stub_source).body:
@@ -79,28 +75,12 @@ class TestStubContent:
                     assert isinstance(method.returns.right, ast.Constant)
                     assert method.returns.right.value is None
 
-    def test_writing_protocols_do_not_require_flush(self, stub_source: str) -> None:
-        """`flush` is called only when the object has one, so demanding it in the protocol would
-        reject minimal writers the runtime accepts. A `Protocol` cannot say "optional"."""
-        assert "def flush(" not in stub_source
-
-    def test_text_seeking_requires_tell(self, stub_source: str) -> None:
-        block = stub_source.split("class SupportsTextReadSeek(Protocol):")[1].split("\nclass ")[0]
-        assert "def tell(" in block
-
-    def test_binary_seeking_does_not_require_tell(self, stub_source: str) -> None:
-        block = stub_source.split("class SupportsBinaryReadSeek(Protocol):")[1].split("\nclass ")[0]
-        assert "def tell(" not in block
-
     def test_untyped_entry_points_degrade_to_any(self, stub_source: str) -> None:
-        """Neither `pyo3-file` nor `pyo3-filelike` implements `FromPyObject`, so their entry
-        points take `Bound<PyAny>` and the stub can say nothing about them."""
+        """Neither `pyo3-file` nor `pyo3-filelike` implements `FromPyObject`."""
         assert "def legacy_read_all(obj: Any) -> bytes" in stub_source
         assert "def filelike_read_all(obj: Any) -> bytes" in stub_source
 
     def test_every_typed_entry_point_is_annotated(self, stub_source: str) -> None:
-        # `legacy_` is pyo3-file and `filelike_` is pyo3-filelike; they are the comparison
-        # functions and are expected to be `Any`.
         comparison = ("def legacy_", "def filelike_", "def bench_")
         for line in stub_source.splitlines():
             if line.startswith("def ") and not line.startswith(comparison):

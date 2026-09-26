@@ -1,13 +1,7 @@
-//! Complete catalog of owned file aliases.
+//! Every owned alias, named `Py`, `Binary` or `Text`, then capabilities in the order `Read`,
+//! `Write`, `Seek`, `Fileno`.
 //!
-//! Start with [`PyBinaryRead`], [`PyBinaryWrite`], [`PyBinaryReadSeek`], [`PyTextRead`],
-//! [`PyTextWrite`] or [`PyTextReadSeek`]. Add `Write`, `Seek` or `Fileno` when the consumer
-//! needs those capabilities. Names follow the order `Read`, `Write`, `Seek`, `Fileno`.
-//!
-//! Each alias lists its available operations and links to their family reference.
-//! Already-attached forms are in [`bound`]; most callers obtain them with
-//! [`bind`](crate::PyIO::bind) or [`into_bound`](crate::PyIO::into_bound)
-//! without naming a bound type. All aliases remain importable from the crate root.
+//! The attached forms are in [`bound`]. All aliases are also importable from the crate root.
 
 use crate::io_types::{has_capability, io_types, payload_type};
 
@@ -124,6 +118,8 @@ macro_rules! define_aliases {
     ($($alias:ident, $bound:ident, $protocol:ident: $payload:ident [$($capability:ident),+];)*) => {
         $(
             #[doc = concat!("An owned `", stringify!($payload), "` stream requiring `", stringify!($($capability),*), "`.")]
+            #[doc = concat!("\nThe attached form is [`",
+                stringify!($bound), "`](crate::aliases::bound::", stringify!($bound), ").\n")]
             #[doc = "\n# Available operations\n\n\
                 - **Construction:** [`new`](crate::PyIO::new), [`py_new`](crate::PyIO::py_new).\n\
                 - **Binding:** [`bind`](crate::PyIO::bind), [`into_bound`](crate::PyIO::into_bound).\n\
@@ -135,13 +131,6 @@ macro_rules! define_aliases {
                 #[doc = operation_doc!($payload, concat!("Py", stringify!($payload), "IO"), PyIO, $capability)]
                 #[cfg_attr(unix, doc = unix_operation_doc!(PyIO, $capability))]
             )*
-            #[doc = concat!("\n# API reference\n\n\
-                Rustdoc does not copy implementations onto convenience aliases. See \
-                [`Py", stringify!($payload), "IO`](crate::Py", stringify!($payload), "IO) for I/O methods \
-                and [`PyIO`](crate::PyIO) for shared operations. Only the capabilities listed \
-                above are available on this alias.\n\nThe attached counterpart is [`",
-                stringify!($bound), "`](crate::aliases::bound::", stringify!($bound),
-                "). See the [usage guide](crate#usage) for examples.")]
             pub type $alias = crate::PyIO<
                 payload_type!($payload),
                 { has_capability!(read; $($capability),*) },
@@ -155,12 +144,8 @@ macro_rules! define_aliases {
 
 io_types!(define_aliases);
 
-/// Complete catalog of aliases tied to an attached Python token.
-///
-/// Prefer constructing an [owned alias](super) and calling
-/// [`bind`](crate::PyIO::bind) or [`into_bound`](crate::PyIO::into_bound).
-/// These names are mainly useful when writing explicit lifetime-bearing signatures.
-/// They are also importable from the crate root.
+/// Every alias tied to an attached Python token, as returned by [`bind`](crate::PyIO::bind) and
+/// [`into_bound`](crate::PyIO::into_bound).
 pub mod bound {
     use crate::io_types::{has_capability, io_types, payload_type};
 
@@ -179,11 +164,6 @@ pub mod bound {
                     #[doc = operation_doc!($payload, concat!("BoundPy", stringify!($payload), "IO"), BoundPyIO, $capability)]
                     #[cfg_attr(unix, doc = unix_operation_doc!(BoundPyIO, $capability))]
                 )*
-                #[doc = concat!("\n# API reference\n\n\
-                    Rustdoc does not copy implementations onto convenience aliases. See \
-                    [`BoundPy", stringify!($payload), "IO`](crate::BoundPy", stringify!($payload), "IO) \
-                    for I/O methods and [`BoundPyIO`](crate::BoundPyIO) for shared operations. \
-                    Only the capabilities listed above are available on this alias.")]
                 pub type $bound<'py> = crate::BoundPyIO<
                     'py,
                     payload_type!($payload),

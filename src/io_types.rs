@@ -1,14 +1,7 @@
-//! One table for the public aliases and their optional Python protocols.
+//! The table of aliases that the alias and protocol macros expand.
 //!
-//! Each row is `owned, bound, protocol: payload [capabilities]`:
-//!
-//! - `owned` and `bound` are the Rust type aliases, spelled `Py…` and `BoundPy…`.
-//! - `protocol` is the stem of the Python `typing.Protocol` the stub generator emits,
-//!   as `Supports<protocol>`. It is deliberately **not** derived from the Rust name:
-//!   Python types carry no `Py` prefix, so the two must be free to differ.
-//! - `payload` is a tag, `Binary` or `Text`, that the consuming macros match on and spell
-//!   into documentation; `payload_type!` maps it to [`BinaryPayload`](crate::BinaryPayload)
-//!   or [`TextPayload`](crate::TextPayload).
+//! Each row is `owned alias, bound alias, protocol stem: payload [capabilities]`. The names are
+//! spelled out because `macro_rules!` cannot build identifiers.
 
 macro_rules! io_types {
     ($define:ident) => {
@@ -47,7 +40,6 @@ macro_rules! io_types {
     };
 }
 
-// The payload tag in the table above is matched on; this maps it to the marker type.
 macro_rules! payload_type {
     (Binary) => {
         crate::BinaryPayload
@@ -57,7 +49,7 @@ macro_rules! payload_type {
     };
 }
 
-// Translate the named capabilities to the four boolean parameters of PyIO/BoundPyIO.
+// Whether a capability appears in the list.
 macro_rules! has_capability {
     (read; read $(, $rest:ident)*) => { true };
     (write; write $(, $rest:ident)*) => { true };

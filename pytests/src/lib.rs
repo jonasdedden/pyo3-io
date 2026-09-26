@@ -71,7 +71,7 @@ fn binary_fileno(file: PyBinaryFileno) -> PyResult<i32> {
     Ok(file.fileno()?)
 }
 
-/// Raw descriptor compatibility; this does not promise a borrowed descriptor lifetime.
+/// Through `AsRawFd`, which panics where `fileno` returns an error.
 #[pyfunction]
 fn binary_fileno_via_as_raw_fd(file: PyBinaryFileno) -> PyResult<i32> {
     #[cfg(unix)]
@@ -84,6 +84,30 @@ fn binary_fileno_via_as_raw_fd(file: PyBinaryFileno) -> PyResult<i32> {
         let _ = file;
         Ok(-1)
     }
+}
+
+/// Reads on a thread of its own while this one releases the GIL; each read attaches for itself.
+#[pyfunction]
+fn read_on_another_thread(py: Python<'_>, file: PyBinaryRead) -> PyResult<usize> {
+    let worker = std::thread::spawn(move || -> std::io::Result<usize> {
+        let mut file = file;
+        let mut sink = Vec::new();
+        file.read_to_end(&mut sink)?;
+        Ok(sink.len())
+    });
+    // Released here, so the child has to acquire it for itself.
+    py.detach(|| worker.join())
+        .map_err(|_| pyo3::exceptions::PyRuntimeError::new_err("the reader thread panicked"))?
+        .map_err(Into::into)
+}
+
+/// The same read with the token held throughout: no attaching happens inside the loop.
+#[pyfunction]
+fn binary_read_all_bound(py: Python<'_>, file: PyBinaryRead) -> PyResult<Py<PyBytes>> {
+    let mut file = file.into_bound(py);
+    let mut buffer = Vec::new();
+    file.read_to_end(&mut buffer)?;
+    Ok(PyBytes::new(py, &buffer).unbind())
 }
 
 // ---------------------------------------------------------------- text
@@ -149,8 +173,7 @@ fn legacy_read_all_text(obj: Bound<'_, PyAny>) -> PyResult<String> {
     Ok(text)
 }
 
-/// A single fixed-size `pyo3-file` read, so the result does not depend on `read_to_end`'s
-/// buffer bookkeeping. Shows plainly what the Rust side receives.
+/// A single fixed-size `pyo3-file` read.
 #[pyfunction]
 fn legacy_read_once(py: Python<'_>, obj: Bound<'_, PyAny>) -> PyResult<Py<PyBytes>> {
     let mut file = pyo3_file::PyFileLikeObject::py_new(obj)?;
@@ -158,19 +181,6 @@ fn legacy_read_once(py: Python<'_>, obj: Bound<'_, PyAny>) -> PyResult<Py<PyByte
     let read = file.read(&mut buffer)?;
     buffer.truncate(read);
     Ok(PyBytes::new(py, &buffer).unbind())
-}
-
-/// Reads `n` characters the `pyo3-file` way, for a like-for-like comparison with
-/// [`text_read_chars`]: a buffer four times the character count, one `read`, then a UTF-8
-/// decode of what `pyo3-file` encoded on the way in.
-#[pyfunction]
-fn legacy_read_chars(obj: Bound<'_, PyAny>, n: usize) -> PyResult<String> {
-    let mut file = pyo3_file::PyFileLikeObject::py_new(obj)?;
-    let mut buffer = vec![0u8; n * 4];
-    let read = file.read(&mut buffer)?;
-    buffer.truncate(read);
-    String::from_utf8(buffer)
-        .map_err(|err| PyErr::new::<pyo3::exceptions::PyValueError, _>(err.to_string()))
 }
 
 /// The untyped equivalent of [`binary_fileno`]. `pyo3-file` exposes this through `AsRawFd`,
@@ -199,38 +209,9 @@ fn legacy_write(obj: Bound<'_, PyAny>, data: &[u8]) -> PyResult<usize> {
     Ok(data.len())
 }
 
-/// Moves the file onto a thread of its own, with this thread releasing the GIL entirely.
-///
-/// The child holds no token; each read attaches for as long as it needs and no longer. A
-/// GIL-bound form could not leave this thread at all.
-#[pyfunction]
-fn read_on_another_thread(py: Python<'_>, file: PyBinaryRead) -> PyResult<usize> {
-    let worker = std::thread::spawn(move || -> std::io::Result<usize> {
-        let mut file = file;
-        let mut sink = Vec::new();
-        file.read_to_end(&mut sink)?;
-        Ok(sink.len())
-    });
-    // Released here, so the child has to acquire it for itself.
-    py.detach(|| worker.join())
-        .map_err(|_| pyo3::exceptions::PyRuntimeError::new_err("the reader thread panicked"))?
-        .map_err(Into::into)
-}
-
-/// The same read with the token held throughout: no attaching happens inside the loop.
-#[pyfunction]
-fn binary_read_all_bound(py: Python<'_>, file: PyBinaryRead) -> PyResult<Py<PyBytes>> {
-    let mut file = file.into_bound(py);
-    let mut buffer = Vec::new();
-    file.read_to_end(&mut buffer)?;
-    Ok(PyBytes::new(py, &buffer).unbind())
-}
-
 // ------------------------------------------------- pyo3-filelike, for comparison
 
-/// `pyo3-filelike` splits binary and text into two types, so this is the closest equivalent of
-/// [`binary_read_all`]. `PyBinaryFile::new` is private, so `From` is the only way in and its
-/// `unwrap` turns a rejected file into a panic.
+/// The `pyo3-filelike` equivalent of [`binary_read_all`]. Its `From` panics on a rejected file.
 #[pyfunction]
 fn filelike_read_all(py: Python<'_>, obj: Bound<'_, PyAny>) -> PyResult<Py<PyBytes>> {
     let mut file = pyo3_filelike::PyBinaryFile::from(obj);
@@ -306,7 +287,7 @@ mod pyo3_io_tests {
         binary_read_all_bound, binary_read_exactly, binary_read_write, binary_seek_roundtrip,
         binary_write, filelike_fileno, filelike_read_all, filelike_read_once,
         filelike_text_as_bytes, filelike_text_read_all, filelike_write, legacy_fileno,
-        legacy_read_all, legacy_read_all_text, legacy_read_chars, legacy_read_once, legacy_write,
+        legacy_read_all, legacy_read_all_text, legacy_read_once, legacy_write,
         read_on_another_thread, text_fileno, text_read_all, text_read_chars, text_read_write,
         text_seek_roundtrip, text_write,
     };

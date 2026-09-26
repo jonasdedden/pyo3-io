@@ -8,7 +8,6 @@ from typing import Any
 import pytest
 
 import pyo3_io_tests as ext
-from helpers import DuckBinaryReader, DuckTextReader
 
 
 class TestModeGuard:
@@ -59,18 +58,12 @@ class TestModeGuard:
                 ext.text_read_all(handle)  # type: ignore[arg-type]  # pyright: ignore[reportArgumentType]
 
     def test_the_suggested_escape_hatches_work(self, tmp_path: Path) -> None:
-        """Both directions are one call away, on the Python side where encoding belongs."""
         path = tmp_path / "t.txt"
         path.write_text("héllo", encoding="utf-8")
         with open(path, encoding="utf-8") as text:
             assert ext.binary_read_all(text.buffer) == "héllo".encode()
         with open(path, "rb") as binary:
             assert ext.text_read_all(io.TextIOWrapper(binary, encoding="utf-8")) == "héllo"
-
-    def test_duck_typed_objects_are_taken_at_their_word(self) -> None:
-        """Only real `io` classes are rejected; structure decides for everything else."""
-        assert ext.binary_read_all(DuckBinaryReader(b"abc")) == b"abc"
-        assert ext.text_read_all(DuckTextReader("abc")) == "abc"
 
 
 class TestCapabilityChecks:

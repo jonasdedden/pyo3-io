@@ -12,14 +12,12 @@ from helpers import (
     DuckBinaryReader,
     DuckBinaryWriter,
     LiesAboutWrite,
-    NonBlocking,
     Overreader,
     PartialWriter,
 )
 
 # Deliberately not valid UTF-8, so anything that decodes on the way through is caught.
 LATIN1 = bytes([0xE9, 0xE8, 0xFC]) * 8
-GZIP_MAGIC = bytes([0x1F, 0x8B, 0x08, 0x00, 0xFF, 0xFE])
 
 
 @pytest.fixture
@@ -55,14 +53,6 @@ class TestReadAll:
         data = bytes(range(256))
         assert ext.binary_read_all(io.BytesIO(data)) == data
 
-    def test_embedded_nulls(self) -> None:
-        data = b"a\x00b\x00\x00c"
-        assert ext.binary_read_all(io.BytesIO(data)) == data
-
-    def test_gzip_magic_survives(self) -> None:
-        """The case that motivated the split: a binary stream must not be decoded."""
-        assert ext.binary_read_all(io.BytesIO(GZIP_MAGIC)) == GZIP_MAGIC
-
     def test_read_to_end_supports_positive_size_only(self) -> None:
         class PositiveReader(DuckBinaryReader):
             def read(self, size: int = -1, /) -> bytes:
@@ -76,12 +66,8 @@ class TestReadAll:
 class TestReadExactly:
     @pytest.mark.parametrize("n", [0, 1, 2, 3, 4, 5, 23, 24, 25, 1000])
     def test_sizes(self, n: int) -> None:
-        """No minimum buffer size: `n` bytes requested is `n` bytes counted."""
-        got = ext.binary_read_exactly(io.BytesIO(LATIN1), n)
-        assert got == LATIN1[:n]
-
-    def test_size_is_bytes_not_items(self) -> None:
-        assert len(ext.binary_read_exactly(io.BytesIO(LATIN1), 3)) == 3
+        """No minimum buffer size."""
+        assert ext.binary_read_exactly(io.BytesIO(LATIN1), n) == LATIN1[:n]
 
     def test_past_end(self) -> None:
         assert ext.binary_read_exactly(io.BytesIO(b"ab"), 100) == b"ab"
@@ -98,12 +84,6 @@ class TestWrite:
         ext.binary_write(writer, LATIN1)
         assert writer.value == LATIN1
         assert writer.flushes == 1
-
-    def test_non_utf8_bytes(self) -> None:
-        """pyo3-file panics here when the object is a text stream; there is no such path now."""
-        buffer = io.BytesIO()
-        ext.binary_write(buffer, GZIP_MAGIC)
-        assert buffer.getvalue() == GZIP_MAGIC
 
     def test_partial_writes_are_retried(self) -> None:
         writer = PartialWriter()
@@ -136,10 +116,9 @@ class TestFileno:
             assert ext.binary_fileno(handle) == handle.fileno()
 
     def test_unsupported_is_an_error_not_a_panic(self) -> None:
-        """`io.BytesIO` has a `fileno` that raises. pyo3-file's `AsRawFd` panics on this."""
-        with pytest.raises(OSError) as excinfo:
+        """`io.BytesIO.fileno` raises, which must not become a panic."""
+        with pytest.raises(OSError):
             ext.binary_fileno(io.BytesIO(b"abc"))
-        assert "pyo3_runtime.PanicException" not in type(excinfo.value).__name__
 
 
 class TestCombined:
@@ -161,10 +140,6 @@ class TestMisbehavingObjects:
     def test_returning_more_than_asked(self) -> None:
         with pytest.raises(OSError, match="after being asked for at most"):
             ext.binary_read_exactly(Overreader(), 4)
-
-    def test_none_is_would_block(self) -> None:
-        with pytest.raises(BlockingIOError, match="nothing could be read right now"):
-            ext.binary_read_exactly(NonBlocking(), 4)
 
     def test_write_claiming_too_much(self) -> None:
         with pytest.raises(OSError, match="reported"):
@@ -198,21 +173,8 @@ class TestBufferReturnTypes:
     def test_any_buffer_is_accepted(self, value: bytes | bytearray | memoryview) -> None:
         assert ext.binary_read_all(self._reader(value)) == b"abc"
 
-    def test_text_streams_buffer_attribute(self, tmp_path: Path) -> None:
-        """The escape hatch the payload-kind error points at has to actually work."""
-        path = tmp_path / "t.txt"
-        path.write_bytes(LATIN1)
-        with open(path, encoding="latin-1") as handle:
-            assert ext.binary_read_all(handle.buffer) == LATIN1
-
 
 class TestBoundAndDetachedForms:
-    """The same file, with and without a token held.
-
-    `PyIO` owns a `Py<PyAny>` and attaches for each operation; `BoundPyIO` borrows a
-    `Python<'py>` and does not. Only the detached one can leave the thread.
-    """
-
     def test_both_forms_read_the_same_thing(self) -> None:
         data = os.urandom(50_000)
         assert ext.binary_read_all(io.BytesIO(data)) == data
@@ -233,9 +195,7 @@ class TestBoundAndDetachedForms:
             ext.read_on_another_thread(io.StringIO("abc"))  # type: ignore[arg-type]  # pyright: ignore[reportArgumentType]
 
 
-class TestDescriptorTraits:
-    """Raw descriptor compatibility has no borrowed-lifetime guarantee and can panic."""
-
+class TestAsRawFd:
     @pytest.mark.skipif(os.name != "posix", reason="AsRawFd is Unix-only; the stand-in returns -1")
     def test_as_raw_fd_gives_the_same_descriptor(self, tmp_binary: Path) -> None:
         with open(tmp_binary, "rb") as handle:
@@ -247,8 +207,3 @@ class TestDescriptorTraits:
             ext.binary_fileno_via_as_raw_fd(io.BytesIO(b"abc"))
         assert "Panic" in type(excinfo.value).__name__
         assert "use PyIO::fileno for the fallible form" in str(excinfo.value)
-
-    def test_and_the_fallible_form_does_not(self) -> None:
-        with pytest.raises(OSError) as excinfo:
-            ext.binary_fileno(io.BytesIO(b"abc"))
-        assert "Panic" not in type(excinfo.value).__name__

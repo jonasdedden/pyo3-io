@@ -152,10 +152,8 @@ pub fn bench_write(
     })
 }
 
-/// chunk=0 reads the whole stream; positive chunks are `read_chars` calls, typed only, since
-/// legacy/filelike size their reads in bytes. Legacy/filelike UTF-8 conversion is part of their
-/// adaptation cost. Returns the UTF-8 length; verify=true also returns the text, for untimed
-/// correctness checks only, so timed calls do not convert the result back to Python.
+/// chunk=0 reads the whole stream; positive chunks are typed-only `read_chars` calls.
+/// Returns the UTF-8 length, and with verify=true also the text.
 #[pyfunction]
 pub fn bench_text_read(
     obj: Bound<'_, PyAny>,
@@ -219,8 +217,7 @@ impl ReadChars for BoundPyTextRead<'_> {
     }
 }
 
-/// Constructs once and writes the same string `count` times. Legacy takes UTF-8 bytes and
-/// decodes them back to `str`; typed hands over the `str`; filelike has no text writer. Flush is identical for all paths.
+/// Constructs once and writes `data` `count` times; filelike has no text writer.
 #[pyfunction]
 pub fn bench_text_write(
     obj: Bound<'_, PyAny>,

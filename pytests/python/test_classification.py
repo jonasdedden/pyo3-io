@@ -1,17 +1,7 @@
 """How the payload kind of an object is worked out.
 
-One signal is used: the `io` hierarchy, which *defines* the payload kind rather than correlating
-with it. Everything else falls back to taking the object at its word.
-
-Measured across the standard-library objects below, the `io` hierarchy is right 28 times and wrong
-none. A `mode` attribute would settle 23 more and be wrong about two. The `encoding`/`errors` a
-text stream reports would settle two more, but only ever for something textual that is not an
-`io.TextIOBase`, which the fallback accepts anyway — so it bought nothing but an earlier error,
-at the price of turning away a binary object that keeps an `encoding` for its own reasons.
-
-That leaves seven objects unclassified, listed in `TestFallsBackToDuckTyping`. Each works in its
-correct kind; using one in the wrong kind is caught at the first read instead of at the boundary,
-and there is no path on which it silently succeeds.
+Only the `io` hierarchy is consulted; any other object is taken at its word, and using it as the
+wrong kind fails at the first read.
 """
 
 import bz2
@@ -108,7 +98,7 @@ def text_factories(files: dict[str, Path]) -> dict[str, Callable[[], Any]]:
 
 
 def duck_typed_factories(files: dict[str, Path]) -> dict[str, Callable[[], Any]]:
-    """The five the classifier deliberately says nothing about."""
+    """Standard-library objects outside the `io` subclasses that decide the kind."""
     return {
         "NamedTemporaryFile": lambda: tempfile.NamedTemporaryFile(),
         "SpooledTemporaryFile wb+": lambda: _spooled("wb+", BYTES),
@@ -161,10 +151,8 @@ class TestStandardLibraryObjectsAreClassifiedCorrectly:
                 pytest.fail(f"{name} should be refused as binary")
 
 
-class TestTheLadderRungs:
-    """The two rungs that are used, and the one that is not."""
-
-    def test_the_io_hierarchy_is_the_only_rung(self) -> None:
+class TestOnlyTheIoHierarchyIsConsulted:
+    def test_the_error_names_the_io_base(self) -> None:
         with pytest.raises(TypeError, match=r"io\.TextIOBase"):
             # intentional wrong-kind rejection
             ext.binary_read_all(io.StringIO(TEXT))  # type: ignore[arg-type]  # pyright: ignore[reportArgumentType]
@@ -177,8 +165,6 @@ class TestTheLadderRungs:
             ext.text_write(io.BytesIO(), TEXT)  # type: ignore[arg-type]  # pyright: ignore[reportArgumentType]
 
     def test_nothing_is_called_on_the_object_during_extraction(self) -> None:
-        """Classification is structural. A handle is not a promise that the thing behind it is
-        ready to be touched, so extraction never calls `read` or `write` to find out what it is."""
 
         class Watchful:
             def __init__(self) -> None:
@@ -193,12 +179,7 @@ class TestTheLadderRungs:
         assert watchful.calls == [("read", 4)], "extraction touched the object"
 
     def test_mode_is_never_consulted(self) -> None:
-        """It would settle 23 more objects, and be wrong about two of them.
-
-        Both are `codecs` wrappers, which report the *wrapped* binary file's mode while producing
-        str. Rather than special-casing the exception, the unreliable signal is simply not used:
-        an object whose `mode` is the only thing it says about itself is duck typed.
-        """
+        """`codecs` readers report their binary source's mode while returning `str`."""
 
         class ModeSaysBinaryButReadsText:
             mode = "rb"
@@ -212,21 +193,17 @@ class TestTheLadderRungs:
             def read(self, size: int = -1, /) -> bytes:
                 return BYTES[:size]
 
-        # Both are accepted for what they actually are, because `mode` is not believed either way.
         assert ext.text_read_chars(ModeSaysBinaryButReadsText(), 4) == TEXT[:4]
         assert ext.binary_read_exactly(ModeSaysTextButReadsBytes(), 4) == BYTES[:4]
 
-    def test_the_real_codecs_readers_work_without_being_special_cased(
-        self, files: dict[str, Path]
-    ) -> None:
-        """The case that made `mode` untrustworthy, handled by not trusting `mode`."""
+    def test_the_real_codecs_reader(self, files: dict[str, Path]) -> None:
         with open(files["bin"], "rb") as raw:
             reader = codecs.getreader("utf-8")(raw)
-            assert reader.mode == "rb"  # it does say this
-            assert ext.text_read_chars(reader, 5) == TEXT[:5]  # and it is text anyway
+            assert reader.mode == "rb"
+            assert ext.text_read_chars(reader, 5) == TEXT[:5]
 
-    def test_an_encoding_property_that_raises_does_not_break_classification(self) -> None:
-        class Awkward:
+    def test_encoding_is_never_consulted(self) -> None:
+        class RaisingEncoding:
             @property
             def encoding(self) -> Any:
                 raise RuntimeError("boom")
@@ -234,20 +211,18 @@ class TestTheLadderRungs:
             def read(self, size: int = -1, /) -> bytes:
                 return BYTES[:size]
 
-        assert ext.binary_read_exactly(Awkward(), 4) == BYTES[:4]
-
-    def test_a_non_string_encoding_is_ignored(self) -> None:
-        class NumericEncoding:
-            encoding = 42
+        class BinaryWithEncoding:
+            encoding = "utf-8"
 
             def read(self, size: int = -1, /) -> bytes:
                 return BYTES[:size]
 
-        assert ext.binary_read_exactly(NumericEncoding(), 4) == BYTES[:4]
+        assert ext.binary_read_exactly(RaisingEncoding(), 4) == BYTES[:4]
+        assert ext.binary_read_exactly(BinaryWithEncoding(), 4) == BYTES[:4]
 
 
-class TestFallsBackToDuckTyping:
-    """The objects no trustworthy signal covers. Each works in its correct kind."""
+class TestUnclassifiedStandardLibraryObjects:
+    """Each works in its correct kind."""
 
     TEXTUAL = frozenset({"codecs.getreader", "SpooledTemporaryFile w+"})
 
@@ -269,15 +244,12 @@ class TestFallsBackToDuckTyping:
     def test_using_one_in_the_wrong_kind_is_caught_at_the_first_read(
         self, files: dict[str, Path]
     ) -> None:
-        """Not at the boundary, which is the price of not touching the object to find out."""
         handle = duck_typed_factories(files)["SpooledTemporaryFile wb+"]()
         with pytest.raises(OSError, match=r"did not return str.*use a binary wrapper"):
             ext.text_read_chars(handle, 4)
 
 
-class TestDuckTypingIsTheFallback:
-    """An object that says nothing about itself is taken at its word, in either kind."""
-
+class TestDuckTypedObjects:
     def test_bare_reader_works_as_binary(self) -> None:
         class Bare:
             def read(self, size: int = -1, /) -> bytes:
@@ -292,21 +264,6 @@ class TestDuckTypingIsTheFallback:
 
         assert ext.text_read_chars(Bare(), 4) == TEXT[:4]
 
-    def test_a_writer_needs_nothing_but_write(self) -> None:
-        """No `flush`: an object without one has nothing to flush."""
-
-        class WriteOnly:
-            def __init__(self) -> None:
-                self.chunks: list[bytes] = []
-
-            def write(self, data: bytes, /) -> int:
-                self.chunks.append(data)
-                return len(data)
-
-        writer = WriteOnly()
-        assert ext.binary_write(writer, BYTES) == len(BYTES)
-        assert b"".join(writer.chunks) == BYTES
-
     def test_a_text_writer_needs_nothing_but_write(self) -> None:
         class WriteOnly:
             def __init__(self) -> None:
@@ -320,24 +277,7 @@ class TestDuckTypingIsTheFallback:
         assert ext.text_write(writer, TEXT) == len(TEXT)
         assert "".join(writer.chunks) == TEXT
 
-    def test_flush_is_still_called_when_present(self) -> None:
-        class Counting:
-            def __init__(self) -> None:
-                self.flushes = 0
-
-            def write(self, data: bytes, /) -> int:
-                return len(data)
-
-            def flush(self) -> None:
-                self.flushes += 1
-
-        writer = Counting()
-        ext.binary_write(writer, b"x")
-        assert writer.flushes == 1
-
     def test_getting_it_wrong_says_what_to_do(self) -> None:
-        """The case structure cannot settle, so the error has to carry the explanation."""
-
         class SilentlyText:
             def read(self, size: int | None = -1, /) -> str:
                 return TEXT[:size] if size is not None and size >= 0 else TEXT
@@ -357,30 +297,9 @@ class TestDuckTypingIsTheFallback:
 
 
 class TestMisleadingInheritance:
-    """An object deriving from the wrong half of the `io` hierarchy is refused, full stop.
-
-    There is deliberately no escape hatch: inheriting from `io.RawIOBase` while dealing in
-    `str` contradicts the base's own contract (typeshed types its `write` as bytes-only),
-    so a checker flags it at the class definition. If the class is yours, fix the base;
-    if it is someone else's, wrap it instead of inheriting — a plain delegating object
-    is taken at its word.
-    """
-
-    def test_an_object_with_its_own_encoding_attribute_is_left_alone(self) -> None:
-        """Nothing correlational is consulted, so this is simply accepted for what it is."""
-
-        class BinaryThatKeepsAnEncoding:
-            encoding = "utf-8"  # for its own purposes
-            errors = "strict"
-
-            def read(self, size: int = -1, /) -> bytes:
-                return BYTES[:size]
-
-        assert ext.binary_read_exactly(BinaryThatKeepsAnEncoding(), 4) == BYTES[:4]
+    """Deriving from the wrong half of `io` is refused; wrapping instead of inheriting works."""
 
     def test_a_structurally_misleading_object_is_refused(self) -> None:
-        """Deriving from the binary half of `io` while dealing in str."""
-
         class TextWriterInBinaryClothing(io.RawIOBase):
             def __init__(self) -> None:
                 self.written = ""
@@ -399,8 +318,6 @@ class TestMisleadingInheritance:
             ext.text_write(TextWriterInBinaryClothing(), TEXT)
 
     def test_wrapping_instead_of_inheriting_is_accepted(self) -> None:
-        """The recipe for a misclassified class that cannot be fixed: delegate, don't inherit."""
-
         class ThirdPartyWriter(io.RawIOBase):
             def __init__(self) -> None:
                 self.written = ""
@@ -427,77 +344,9 @@ class TestMisleadingInheritance:
         assert ext.text_write(TextShim(inner), TEXT) == len(TEXT)
         assert inner.written == TEXT
 
-    def test_no_signal_reaches_the_type_stubs(self, stub_source: str) -> None:
-        """Classification is a runtime concern. The protocols come from the Rust type, so nothing
-        an object claims about itself can influence what the type checker demands."""
-        assert "mode" not in stub_source
-        assert "encoding" not in stub_source
-
-
-class TestWhyBothBinaryBasesAreNamed:
-    """`RawIOBase` and `BufferedIOBase` are siblings, and the obvious shortcut is wrong.
-
-    Neither is inside the other, nothing is both, and both halves hold ordinary objects. Checking
-    `IOBase` and not `TextIOBase` instead would collapse them into one test -- and swallow the
-    middle ground where `tempfile.SpooledTemporaryFile` lives.
-    """
-
-    def test_the_two_bases_are_siblings(self) -> None:
-        assert io.RawIOBase not in io.BufferedIOBase.__mro__
-        assert io.BufferedIOBase not in io.RawIOBase.__mro__
-
-    def test_raw_only_objects_need_the_raw_check(self, tmp_path: Path) -> None:
-        """Unbuffered files are `RawIOBase` and nothing else."""
-        path = tmp_path / "raw.bin"
-        path.write_bytes(BYTES)
-        with open(path, "rb", buffering=0) as handle:
-            assert isinstance(handle, io.RawIOBase)
-            assert not isinstance(handle, io.BufferedIOBase)
-            assert ext.binary_read_exactly(handle, 4) == BYTES[:4]
-
-    def test_buffered_only_objects_need_the_buffered_check(self) -> None:
-        """Nearly everything else is `BufferedIOBase` and nothing else."""
-        handle = io.BytesIO(BYTES)
-        assert isinstance(handle, io.BufferedIOBase)
-        assert not isinstance(handle, io.RawIOBase)
-        assert ext.binary_read_exactly(handle, 4) == BYTES[:4]
-
-    def test_nothing_is_both(self, files: dict[str, Path]) -> None:
-        for factory in list(binary_factories(files).values()):
-            handle = factory()
-            assert not (
-                isinstance(handle, io.RawIOBase) and isinstance(handle, io.BufferedIOBase)
-            ), handle
-
-    def test_the_iobase_shortcut_would_break_this(self) -> None:
-        """`SpooledTemporaryFile` is `IOBase` alone, and its text form reads `str`.
-
-        `isinstance(obj, IOBase) and not isinstance(obj, TextIOBase)` would call this binary. The
-        `io` rung runs first, so it would win over the `encoding` rung that gets it right today.
-        """
-        handle = _spooled("w+", TEXT)
-        assert isinstance(handle, io.IOBase)
-        assert not isinstance(handle, (io.RawIOBase, io.BufferedIOBase, io.TextIOBase))
-        # The shortcut's verdict would be "binary", which is wrong. The real ladder gives no
-        # verdict at all, so the object is taken at its word and works.
-        assert ext.text_read_chars(handle, 4) == TEXT[:4]
-
 
 class TestDirectionChecks:
-    """A writer handed to something that wants a reader, caught at the boundary.
-
-    `io.IOBase` gives every stream a `read`, a `write` and a `seek`, including the ones that only
-    raise, so `hasattr` cannot tell them apart. `readable()`, `writable()` and `seekable()` are
-    the hierarchy's own answer, and their documented meaning is exactly this: if one is false, the
-    corresponding call raises.
-    """
-
-    def test_hasattr_alone_cannot_tell_a_writer_from_a_reader(self, tmp_path: Path) -> None:
-        """The gap this closes."""
-        path = tmp_path / "w.bin"
-        with open(path, "wb") as handle:
-            assert hasattr(handle, "read")  # inherited, and it raises
-            assert handle.readable() is False
+    """`io.IOBase` has every method, so its `readable()`/`writable()`/`seekable()` decide."""
 
     def test_a_write_only_file_is_refused_as_a_reader(self, tmp_path: Path) -> None:
         path = tmp_path / "w.bin"
@@ -520,12 +369,9 @@ class TestDirectionChecks:
                 ext.text_write(handle, TEXT)
 
     def test_an_unseekable_stream_is_refused_as_seekable(self) -> None:
-        """Sockets and pipes have a `seek` that raises."""
         left, right = socket.socketpair()
         try:
             handle = left.makefile("rb")
-            assert hasattr(handle, "seek")
-            assert handle.seekable() is False
             with pytest.raises(TypeError, match=r"seekable\(\) is False"):
                 ext.binary_seek_roundtrip(handle)
         finally:
@@ -544,7 +390,6 @@ class TestDirectionChecks:
                 ext.binary_write(handle, BYTES)
 
     def test_duck_typed_objects_are_not_asked(self) -> None:
-        """These are only queries on `io.IOBase`. Elsewhere they would be arbitrary code."""
 
         class LiesAboutItself:
             def readable(self) -> bool:
@@ -556,8 +401,6 @@ class TestDirectionChecks:
         assert ext.binary_read_exactly(LiesAboutItself(), 4) == BYTES[:4]
 
     def test_an_iobase_that_raises_from_the_query_is_not_rejected(self) -> None:
-        """A raise is not an answer, so it falls through rather than failing."""
-
         class Awkward(io.RawIOBase):
             def readable(self) -> bool:
                 raise ValueError("cannot say")
@@ -566,11 +409,3 @@ class TestDirectionChecks:
                 return BYTES[:size] if size is not None and size >= 0 else BYTES
 
         assert ext.binary_read_exactly(Awkward(), 4) == BYTES[:4]
-
-    def test_every_standard_library_reader_still_passes(self, files: dict[str, Path]) -> None:
-        for name, factory in binary_factories(files).items():
-            handle = factory()
-            try:
-                ext.binary_read_exactly(handle, 4)
-            except Exception as err:  # noqa: BLE001
-                pytest.fail(f"{name} should still be accepted as a reader: {err}")

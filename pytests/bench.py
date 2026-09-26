@@ -1,9 +1,5 @@
 #!/usr/bin/env python3
-"""Correctness-gated adapter benchmarks (stdlib only).
-
-Run `python pytests/bench.py --quick` for a release smoke run.
-No implementation is assumed to be faster.
-"""
+"""Adapter benchmarks, each gated on an untimed correctness check (stdlib only)."""
 
 import argparse
 import gc
@@ -24,8 +20,7 @@ TYPED: tuple[str, ...] = IMPLEMENTATIONS[:2]
 # pyo3-filelike has no text writer.
 TEXT_WRITERS: tuple[str, ...] = IMPLEMENTATIONS[:3]
 
-# A benchmark step: resetting, running, or checking. Results are discarded, so every
-# step shares one shape and `report` stays oblivious to what each step returns.
+# A benchmark step: resetting, running, or checking. Results are discarded.
 Step = Callable[[], object]
 
 
@@ -41,22 +36,14 @@ def check_equal(actual: object, expected: object) -> None:
         raise ValueError("incorrect result (excluded from timing)")
 
 
-def check_construct(ext: Any, stream: BinaryIO, name: str, count: int) -> None:
-    """Run one construction batch; `bench_construct` returns None by design."""
-    ext.bench_construct(stream, name, count)
-
-
 def report(
     label: str,
     cases: dict[str, tuple[Step, Step, Step]],
     args: argparse.Namespace,
     divisor: float = 1,
 ) -> None:
-    """Cases are (reset, call, check); neither reset nor check is timed.
-
-    Rotate implementation order between repeats and report median repeat means.
-    Results are dropped inside the timed call, identically for every adapter.
-    """
+    """Cases are (reset, call, check); only call is timed. Reports the median of repeat means,
+    rotating implementation order between repeats."""
     if getattr(args, "filter", None) and args.filter not in label:
         return
     samples: dict[str, list[float]] = {}
@@ -107,7 +94,7 @@ def construct_cases(
         return (
             lambda: None,
             lambda: ext.bench_construct(stream, name, constructors),
-            lambda: check_construct(ext, stream, name, 1),
+            lambda: ext.bench_construct(stream, name, 1),
         )
 
     return {name: case(name) for name in (*IMPLEMENTATIONS, "legacy-checked")}
@@ -223,22 +210,9 @@ def main() -> None:
         f"size={size}, chunks={chunks}, constructor batch={constructors}"
     )
     if args.profile != "release":
-        print("DEBUG BUILD: diagnostic only, not representative performance.")
-    print("Times: median repeat mean [min, max], microseconds per complete operation.")
-    print("Construction rows alone are per adapter. Inputs and seek/truncate resets are untimed.")
-    print("Each I/O call constructs ONE adapter; chunks amortize that cost across a stream.")
-    print("Typed 'detached' means owned adapter, NOT GIL release: calls enter from Python.")
-    print("Legacy uses py_new; legacy-checked uses py_with_requirements(read=true).")
-    print("Constructor guarantees differ: typed checks payload and capability, legacy-checked")
-    print(
-        "checks method presence; filelike uses its own constructor. These are costs, not rankings."
-    )
-    print("Real files are buffered, warm/page-cached; flush is NOT fsync/durable storage.")
-    print("Full binary reads allocate Rust output; chunk reads reuse a fixed buffer.")
-    print("Timed binary reads return only a byte count; untimed checks compare every byte.")
-    print("Text compares identical Unicode strings, never characters against bytes;")
-    print("timed text reads return only a UTF-8 length, like binary reads.")
-    print("Use --memory for fresh-process peak RSS; it is not per-adapter allocation cost.\n")
+        print("DEBUG BUILD: not representative.")
+    print("Median repeat mean [min, max] in microseconds per operation, each I/O row including")
+    print("one adapter construction. legacy-checked is pyo3-file's py_with_requirements.\n")
 
     data: bytes = (bytes(range(256)) * ((size + 255) // 256))[:size]
     with io.BytesIO(data) as memory, tempfile.TemporaryFile("w+b") as disk:
@@ -285,9 +259,7 @@ def main() -> None:
                 args,
             )
     if args.memory:
-        print("\nBinary bulk-read peak process RSS (one fresh process per case).")
-        print("Includes Python, extension loading and input setup; before/after are high-water")
-        print("marks, not current memory or allocated-byte counts. Small differences are noise.")
+        print("\nBinary bulk-read peak process RSS, one fresh process per case.")
         for source in ("BytesIO", "temporary-file"):
             for name in IMPLEMENTATIONS:
                 result = subprocess.run(

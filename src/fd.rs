@@ -1,7 +1,6 @@
-//! Unix descriptor access. A Python reference keeps the object alive, not its descriptor open.
+//! Unix descriptor access.
 //!
-//! There is deliberately no `AsFd`: Python can close the descriptor during a Rust borrow.
-//! Use fallible `fileno()` for a number, or `try_clone_fd()` for an independently owned duplicate.
+//! There is deliberately no `AsFd`: holding the Python object does not keep its descriptor open.
 
 use crate::{BoundPyIO, Payload, PyIO};
 use pyo3::Python;
@@ -18,9 +17,7 @@ fn expect_fd(fd: io::Result<i32>) -> RawFd {
 }
 
 fn duplicate(fd: RawFd) -> io::Result<OwnedFd> {
-    // SAFETY: fcntl takes integer arguments here. Invalid/closed descriptors produce an OS
-    // error; no BorrowedFd (and hence no promise about the foreign descriptor's lifetime)
-    // is manufactured. The kernel atomically sets close-on-exec on the new descriptor.
+    // SAFETY: fcntl only takes integers here; an invalid descriptor is an OS error.
     let duplicate = unsafe { libc::fcntl(fd, libc::F_DUPFD_CLOEXEC, 0) };
     if duplicate < 0 {
         return Err(io::Error::last_os_error());
@@ -33,15 +30,11 @@ impl<P, const READ: bool, const WRITE: bool, const SEEK: bool> PyIO<P, READ, WRI
 where
     P: Payload,
 {
-    /// Duplicates `fileno()` into an independently owned, close-on-exec descriptor.
+    /// Duplicates `fileno()` into an owned, close-on-exec descriptor that outlives the Python
+    /// object.
     ///
-    /// Closing the Python object afterwards does not close the duplicate. Both descriptors
-    /// share the OS file offset, but operations on the duplicate bypass Python's buffers.
-    /// Flush/synchronize buffered I/O before mixing the two interfaces.
-    ///
-    /// Coordinate concurrent closing or replacement of the original descriptor if the
-    /// identity of the duplicated resource matters. Holding a Python reference alone does
-    /// not prevent another owner from closing and reusing its descriptor number.
+    /// The duplicate shares the file offset but bypasses Python's buffers, so flush before mixing
+    /// the two.
     pub fn try_clone_fd(&self) -> io::Result<OwnedFd> {
         Python::attach(|py| self.bind(py).try_clone_fd())
     }
@@ -52,7 +45,7 @@ impl<P, const READ: bool, const WRITE: bool, const SEEK: bool>
 where
     P: Payload,
 {
-    /// Duplicates the descriptor. See [`PyIO::try_clone_fd`] for ownership and buffering.
+    /// Duplicates the descriptor. See [`PyIO::try_clone_fd`].
     pub fn try_clone_fd(&self) -> io::Result<OwnedFd> {
         duplicate(self.fileno()?)
     }
@@ -65,8 +58,7 @@ where
 {
     /// # Panics
     ///
-    /// If `fileno()` raises, which Python objects without a descriptor do. Use
-    /// [`fileno`](PyIO::fileno) to handle that.
+    /// If `fileno()` raises. Use [`fileno`](PyIO::fileno) to handle that.
     fn as_raw_fd(&self) -> RawFd {
         expect_fd(self.fileno())
     }
@@ -79,7 +71,7 @@ where
 {
     /// # Panics
     ///
-    /// As [`AsRawFd::as_raw_fd`] for [`PyIO`].
+    /// If `fileno()` raises. Use [`fileno`](BoundPyIO::fileno) to handle that.
     fn as_raw_fd(&self) -> RawFd {
         expect_fd(self.fileno())
     }

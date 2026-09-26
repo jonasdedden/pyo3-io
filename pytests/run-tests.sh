@@ -18,8 +18,7 @@ for arg in "$@"; do
     esac
 done
 if (( stubs )) && [[ -z "${PYO3_INTROSPECTION:-}" && -z "${PYO3_CHECKOUT:-}" ]]; then
-    echo "--stubs requires an explicit PYO3_INTROSPECTION executable or PYO3_CHECKOUT." >&2
-    echo "The generator must support attach_to_root; ordinary PyO3 builds need no patch." >&2
+    echo "--stubs requires PYO3_INTROSPECTION or PYO3_CHECKOUT with attach_to_root support." >&2
     exit 2
 fi
 export PYTESTS_PROFILE=release
