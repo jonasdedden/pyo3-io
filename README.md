@@ -1,10 +1,10 @@
-# pyo3-typed-io
+# pyo3-io
 
 Accept Python file objects in Rust, **typed by what they hold and what you need from them**.
 
 ```rust,no_run
 use pyo3::prelude::*;
-use pyo3_typed_io::{PyBinaryRead, PyTextWrite};
+use pyo3_io::{PyBinaryRead, PyTextWrite};
 use std::io::Read;
 
 #[pyfunction]
@@ -48,7 +48,7 @@ checksum(closed)                  # ValueError: I/O operation on closed file
 Both work well for the common case: a binary file opened with `"rb"`. The differences show up at
 the edges: text streams, wrong arguments, objects without a file descriptor.
 
-|  | **pyo3-typed-io** | [`pyo3-file`](https://crates.io/crates/pyo3-file) 0.17 | [`pyo3-filelike`](https://crates.io/crates/pyo3-filelike) 0.5 |
+|  | **pyo3-io** | [`pyo3-file`](https://crates.io/crates/pyo3-file) 0.17 | [`pyo3-filelike`](https://crates.io/crates/pyo3-filelike) 0.5 |
 |---|:---:|:---:|:---:|
 | **Correctness** | | | |
 | Read an `io.StringIO` | ✅ | ❌ fails for most lengths | ✅ |
@@ -65,7 +65,7 @@ the edges: text streams, wrong arguments, objects without a file descriptor.
 | **Features** | | | |
 | `std::io::{Read, Write, Seek}` for binary | ✅ | ✅ | ✅ |
 | Text API counted in characters | ✅ `read_chars`, `write_str` | ❌ | ❌ |
-| **Performance** (1 MiB, vs. pyo3-typed-io) | | | |
+| **Performance** (1 MiB, vs. pyo3-io) | | | |
 | `read_to_end` | ✅ | 1.3–2.1× slower | 1.3–2.1× slower |
 | Peak memory, 16 MiB `read_to_end` | ✅ +18 MiB | +32 MiB | +32 MiB |
 | Small (64 B) reads and writes | ✅ | ✅ about the same | 1.5–2× slower |
@@ -103,7 +103,7 @@ takes a reader or writer:
 
 ```rust,no_run
 use pyo3::prelude::*;
-use pyo3_typed_io::{PyBinaryRead, PyBinaryWrite};
+use pyo3_io::{PyBinaryRead, PyBinaryWrite};
 use std::io::{BufRead, BufReader, Write};
 
 #[pyfunction]
@@ -126,7 +126,7 @@ they get their own small API:
 
 ```rust,no_run
 use pyo3::prelude::*;
-use pyo3_typed_io::{PyTextRead, PyTextReadSeek, PyTextWrite};
+use pyo3_io::{PyTextRead, PyTextReadSeek, PyTextWrite};
 
 #[pyfunction]
 fn shout(mut source: PyTextRead, mut out: PyTextWrite) -> PyResult<()> {
@@ -167,7 +167,7 @@ lifting. Release the GIL, and each read re-attaches only for as long as it takes
 
 ```rust,no_run
 use pyo3::prelude::*;
-use pyo3_typed_io::PyBinaryRead;
+use pyo3_io::PyBinaryRead;
 use std::io::Read;
 
 #[pyfunction]
@@ -191,7 +191,7 @@ no attaching per call, which adds up over many small reads:
 ```rust,no_run
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyList};
-use pyo3_typed_io::PyBinaryRead;
+use pyo3_io::PyBinaryRead;
 use std::io::{ErrorKind, Read};
 
 /// Splits a stream of `u32`-length-prefixed records into a list of `bytes`.

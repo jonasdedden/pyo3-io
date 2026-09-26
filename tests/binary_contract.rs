@@ -1,7 +1,7 @@
 //! Binary readers follow the Python buffer protocol and Rust's `Read` contract.
 
 use pyo3::{prelude::*, types::PyModule};
-use pyo3_typed_io::PyBinaryRead;
+use pyo3_io::PyBinaryRead;
 use std::{
     ffi::CString,
     io::{self, Read},

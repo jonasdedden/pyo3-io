@@ -36,7 +36,7 @@ const ANY: PyStaticExpr = type_hint_identifier!("typing", "Any");
 
 macro_rules! protocol_id {
     ($protocol:ident) => {
-        concat!("pyo3-typed-io:Supports", stringify!($protocol))
+        concat!("pyo3-io:Supports", stringify!($protocol))
     };
 }
 
@@ -48,7 +48,7 @@ macro_rules! emit_fragment {
             const CHUNK: Chunk = $chunk;
             const LEN: usize = CHUNK.len();
             #[used]
-            #[export_name = concat!("PYO3_INTROSPECTION_1_PYO3_TYPED_IO_", stringify!($protocol), "_", stringify!($suffix))]
+            #[export_name = concat!("PYO3_INTROSPECTION_1_PYO3_IO_", stringify!($protocol), "_", stringify!($suffix))]
             static FRAGMENT: SerializedIntrospectionFragment<LEN> = CHUNK.serialize::<LEN>();
         };
     };

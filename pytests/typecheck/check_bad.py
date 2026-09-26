@@ -5,7 +5,7 @@
 
 import io
 
-import pyo3_typed_io_tests as ext
+import pyo3_io_tests as ext
 
 
 class ReadsText:

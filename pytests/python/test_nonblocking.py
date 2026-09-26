@@ -22,7 +22,7 @@ from collections.abc import Iterator
 
 import pytest
 
-import pyo3_typed_io_tests as ext
+import pyo3_io_tests as ext
 
 
 class NoneThenData:

@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 
-import pyo3_typed_io_tests as ext
+import pyo3_io_tests as ext
 
 _EXTENSION_FILE = ext.__file__
 assert _EXTENSION_FILE is not None, "test extension has no __file__"
@@ -18,7 +18,7 @@ ExpectedMethod = tuple[list[tuple[str, dict[str, Any]]], dict[str, Any]]
 
 
 def fragment(alias: str, suffix: str) -> Any:
-    name = f"PYO3_INTROSPECTION_1_PYO3_TYPED_IO_{alias}_{suffix}"
+    name = f"PYO3_INTROSPECTION_1_PYO3_IO_{alias}_{suffix}"
     length = ctypes.c_uint32.in_dll(LIBRARY, name)
     # The encoder's repr(C) layout is a u32 followed immediately by JSON bytes.
     assert 0 < length.value < 16384
@@ -45,7 +45,7 @@ def nullable(value: dict[str, Any]) -> dict[str, Any]:
 def test_linked_protocol_matches_its_capabilities(kind: str, bits: int) -> None:
     alias = kind + "".join(name for name, bit in CAPABILITIES if bits & bit)
     protocol = f"Supports{alias}"
-    parent = f"pyo3-typed-io:{protocol}"
+    parent = f"pyo3-io:{protocol}"
     assert fragment(alias, "protocol") == {
         "type": "class",
         "attach_to_root": True,

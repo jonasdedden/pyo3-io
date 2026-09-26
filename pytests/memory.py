@@ -42,7 +42,7 @@ def main() -> None:
     sys.path.insert(0, str(Path(__file__).resolve().parent / "python"))
     from _extension import install
     install(args.profile)
-    import pyo3_typed_io_tests as ext
+    import pyo3_io_tests as ext
 
     stream: BinaryIO
     if args.source == "BytesIO":

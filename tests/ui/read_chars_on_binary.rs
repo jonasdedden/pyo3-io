@@ -1,5 +1,5 @@
 //! Characters are the text API's unit; a binary object counts bytes.
-use pyo3_typed_io::PyBinaryRead;
+use pyo3_io::PyBinaryRead;
 
 fn main() {}
 

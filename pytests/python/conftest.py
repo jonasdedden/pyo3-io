@@ -16,7 +16,7 @@ def stub_source() -> str:
     """The generated stub, which `run-tests.sh` produces before pytest runs."""
     if os.environ.get("PYTESTS_STUBS") == "0":
         pytest.skip("stub checks not requested; use ./pytests/run-tests.sh --stubs")
-    path = ROOT / "typecheck" / "pyo3_typed_io_tests-stubs" / "__init__.pyi"
+    path = ROOT / "typecheck" / "pyo3_io_tests-stubs" / "__init__.pyi"
     if not path.exists():
         if os.environ.get("PYTESTS_STUBS") == "1":
             pytest.fail(f"required generated stubs are missing: {path}")

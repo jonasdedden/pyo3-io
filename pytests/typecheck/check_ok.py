@@ -6,7 +6,7 @@ for static acceptance, not a guarantee that runtime I/O succeeds.
 
 import io
 
-import pyo3_typed_io_tests as ext
+import pyo3_io_tests as ext
 
 # ---- real io objects, binary
 with open("/etc/hostname", "rb") as binary:

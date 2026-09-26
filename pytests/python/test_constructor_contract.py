@@ -5,7 +5,7 @@ from typing import Any
 
 import pytest
 
-import pyo3_typed_io_tests as ext
+import pyo3_io_tests as ext
 
 
 @pytest.mark.parametrize("value", [None, 42, b"read"])

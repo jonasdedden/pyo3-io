@@ -2,7 +2,7 @@
 //!
 //! These are compile-time assertions; reaching the test body at all means the matrix holds.
 
-use pyo3_typed_io::*;
+use pyo3_io::*;
 use std::io::{Read, Seek, Write};
 
 fn assert_read<T: Read>() {}

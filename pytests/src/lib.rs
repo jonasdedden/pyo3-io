@@ -1,9 +1,9 @@
-//! An extension exercising every shape `pyo3-typed-io` offers, plus the untyped `pyo3-file`
+//! An extension exercising every shape `pyo3-io` offers, plus the untyped `pyo3-file`
 //! equivalents so the two can be compared side by side from Python.
 
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
-use pyo3_typed_io::{
+use pyo3_io::{
     PyBinaryFileno, PyBinaryRead, PyBinaryReadSeek, PyBinaryReadWrite, PyBinaryReadWriteSeekFileno,
     PyBinaryWrite, PyTextFileno, PyTextRead, PyTextReadSeek, PyTextReadWrite, PyTextWrite,
 };
@@ -294,7 +294,7 @@ fn filelike_write(obj: Bound<'_, PyAny>, data: &[u8]) -> PyResult<usize> {
 }
 
 #[pymodule]
-mod pyo3_typed_io_tests {
+mod pyo3_io_tests {
     #[pymodule_export]
     use super::benchmarks::{
         bench_construct, bench_read, bench_text_read, bench_text_write, bench_write,

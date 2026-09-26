@@ -25,9 +25,9 @@ def cargo_artifact(built: Path) -> str:
 @pytest.mark.parametrize(
     ("platform", "filename"),
     [
-        ("linux", "libpyo3_typed_io_tests.so"),
-        ("darwin", "libpyo3_typed_io_tests.dylib"),
-        ("win32", "pyo3_typed_io_tests.dll"),
+        ("linux", "libpyo3_io_tests.so"),
+        ("darwin", "libpyo3_io_tests.dylib"),
+        ("win32", "pyo3_io_tests.dll"),
     ],
 )
 @pytest.mark.parametrize("profile", ["debug", "release"])

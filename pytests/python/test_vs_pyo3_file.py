@@ -11,7 +11,7 @@ from typing import Any
 
 import pytest
 
-import pyo3_typed_io_tests as ext
+import pyo3_io_tests as ext
 
 LATIN1_TEXT = "éèü" * 8
 LATIN1_BYTES = LATIN1_TEXT.encode("latin-1")

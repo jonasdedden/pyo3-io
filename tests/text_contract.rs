@@ -1,7 +1,7 @@
 //! Text streams count characters and carry opaque Python positions.
 use pyo3::prelude::*;
 use pyo3::types::PyModule;
-use pyo3_typed_io::{PyTextRead, PyTextReadSeek, PyTextSeek, PyTextWrite};
+use pyo3_io::{PyTextRead, PyTextReadSeek, PyTextSeek, PyTextWrite};
 use std::ffi::CString;
 use std::io::ErrorKind;
 

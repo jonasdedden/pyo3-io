@@ -4,7 +4,7 @@ import io
 
 import pytest
 
-import pyo3_typed_io_tests as ext
+import pyo3_io_tests as ext
 
 
 def test_surrogate_text_is_not_silently_replaced() -> None:

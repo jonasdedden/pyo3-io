@@ -3,7 +3,7 @@
 //! Every failure has to be usable twice over: as an [`io::Error`] with a kind a Rust caller can
 //! match on, and as the Python exception a caller on that side would expect.
 
-use pyo3_typed_io::Error;
+use pyo3_io::Error;
 use std::io;
 
 fn kind(err: Error) -> io::ErrorKind {

@@ -384,7 +384,7 @@ where
 ///
 /// ```rust,no_run
 /// use pyo3::prelude::*;
-/// use pyo3_typed_io::PyBinaryRead;
+/// use pyo3_io::PyBinaryRead;
 /// use std::io::Read;
 ///
 /// #[pyfunction]

@@ -8,7 +8,7 @@ from typing import Any
 import pytest
 from helpers import DuckBinaryReader, DuckTextReader
 
-import pyo3_typed_io_tests as ext
+import pyo3_io_tests as ext
 
 
 class TestModeGuard:

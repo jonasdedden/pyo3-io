@@ -165,7 +165,7 @@ def main() -> None:
     sys.path.insert(0, str(Path(__file__).resolve().parent / "python"))
     from _extension import install
     extension_path = install(args.profile)
-    import pyo3_typed_io_tests as ext
+    import pyo3_io_tests as ext
 
     print(f"Python {sys.version.split()[0]} / {platform.platform()}")
     print(f"extension={extension_path}; profile={args.profile}")

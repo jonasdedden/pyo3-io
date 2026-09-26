@@ -1,5 +1,5 @@
 [package]
-name = "pyo3-typed-io"
+name = "pyo3-io"
 version = "0.1.0"
 edition = "2021"
 description = "Python file-like objects whose payload kind and capabilities are part of their Rust type"
