@@ -115,6 +115,9 @@ class TestWriteReturningNone:
         assert writer.calls == 1
 
 
+@pytest.mark.skipif(
+    not hasattr(os, "set_blocking"), reason="Windows supports os.set_blocking from 3.12"
+)
 class TestRealNonBlockingPipe:
     """The same thing end to end, with a real file descriptor rather than a stand-in."""
 
